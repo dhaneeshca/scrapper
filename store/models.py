@@ -78,6 +78,13 @@ class Shortlist(Base):
     added_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
 
+class NotInterested(Base):
+    __tablename__ = "not_interested"
+
+    listing_id = Column(String, ForeignKey("listings.id"), primary_key=True)
+    added_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
 class VariantAlias(Base):
     __tablename__ = "variant_aliases"
 

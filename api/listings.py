@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 
 from store.db import get_session
-from store.models import Listing, Shortlist
+from store.models import Listing, Shortlist, NotInterested
 
 router = APIRouter()
 
@@ -36,6 +36,7 @@ class ListingOut(BaseModel):
     dedup_key: Optional[str]
     config_id: Optional[str]
     shortlisted: bool = False
+    not_interested: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -158,17 +159,21 @@ def list_listings(
         sq = sq.order_by(col.desc() if sort_dir == "desc" else col.asc())
         rows = sq.offset(offset).limit(limit).all()
 
+        ids = [r.id for r in rows]
         shortlisted_ids = {
             r.listing_id
-            for r in session.query(Shortlist.listing_id).filter(
-                Shortlist.listing_id.in_([r.id for r in rows])
-            )
+            for r in session.query(Shortlist.listing_id).filter(Shortlist.listing_id.in_(ids))
+        }
+        not_interested_ids = {
+            r.listing_id
+            for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
 
         out = []
         for r in rows:
             d = ListingOut.model_validate(r)
             d.shortlisted = r.id in shortlisted_ids
+            d.not_interested = r.id in not_interested_ids
             out.append(d)
         return out
 
@@ -223,11 +228,14 @@ def deduped_listings(
 
         rows = sq.order_by(Listing.price.asc()).limit(limit).all()
 
+        ids = [r.id for r in rows]
         shortlisted_ids = {
             r.listing_id
-            for r in session.query(Shortlist.listing_id).filter(
-                Shortlist.listing_id.in_([r.id for r in rows])
-            )
+            for r in session.query(Shortlist.listing_id).filter(Shortlist.listing_id.in_(ids))
+        }
+        not_interested_ids = {
+            r.listing_id
+            for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
 
         groups: dict[str, list[Listing]] = {}
@@ -243,6 +251,7 @@ def deduped_listings(
             rep = members[0]
             d = ListingOut.model_validate(rep)
             d.shortlisted = rep.id in shortlisted_ids
+            d.not_interested = rep.id in not_interested_ids
             result.append(DedupGroup(
                 dedup_key=key,
                 best_price=rep.price or 0,
@@ -254,6 +263,7 @@ def deduped_listings(
         for r in no_dedup:
             d = ListingOut.model_validate(r)
             d.shortlisted = r.id in shortlisted_ids
+            d.not_interested = r.id in not_interested_ids
             result.append(DedupGroup(
                 dedup_key=r.id,
                 best_price=r.price or 0,
@@ -273,8 +283,10 @@ def get_listing(listing_id: str):
         if not row:
             raise HTTPException(404, "not found")
         sl = session.query(Shortlist).filter_by(listing_id=listing_id).first()
+        ni = session.query(NotInterested).filter_by(listing_id=listing_id).first()
         d = ListingOut.model_validate(row)
         d.shortlisted = sl is not None
+        d.not_interested = ni is not None
         return d
 
 
@@ -290,6 +302,8 @@ def patch_listing(listing_id: str, body: ListingPatch):
         session.commit()
         session.refresh(row)
         sl = session.query(Shortlist).filter_by(listing_id=listing_id).first()
+        ni = session.query(NotInterested).filter_by(listing_id=listing_id).first()
         d = ListingOut.model_validate(row)
         d.shortlisted = sl is not None
+        d.not_interested = ni is not None
         return d

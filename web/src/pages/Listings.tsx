@@ -24,6 +24,7 @@ interface Listing {
   is_active: boolean
   is_manually_edited: boolean
   shortlisted: boolean
+  not_interested: boolean
 }
 
 interface DedupGroup {
@@ -231,12 +232,14 @@ function ListingPanel({
   onClose,
   onUpdated,
   onShortlistToggle,
+  onNotInterestedToggle,
 }: {
   listing: Listing
   groupListingIds?: string[]
   onClose: () => void
   onUpdated: (updated: Listing) => void
   onShortlistToggle: (l: Listing) => void
+  onNotInterestedToggle: (l: Listing) => void
 }) {
   const [activeListing, setActiveListing] = useState<Listing>(listing)
   const [groupListings, setGroupListings] = useState<Listing[]>([])
@@ -410,6 +413,11 @@ function ListingPanel({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => onNotInterestedToggle(activeListing)}
+              className={`text-sm leading-none transition-all px-1 ${activeListing.not_interested ? 'text-red-500 drop-shadow-[0_0_6px_rgb(239,68,68)]' : 'text-slate-600 hover:text-slate-400'}`}
+              title={activeListing.not_interested ? 'Remove not interested' : 'Not interested'}
+            >✕</button>
             <button
               onClick={() => onShortlistToggle(activeListing)}
               className={`text-lg leading-none transition-colors ${activeListing.shortlisted ? 'text-amber-400 hover:text-amber-300' : 'text-slate-600 hover:text-slate-400'}`}
@@ -643,6 +651,15 @@ export default function Listings() {
     handleListingUpdated(updated)
   }
 
+  const toggleNotInterested = async (l: Listing) => {
+    if (l.not_interested) {
+      await fetch(`/api/not-interested/${l.id}`, { method: 'DELETE' })
+    } else {
+      await fetch(`/api/not-interested/${l.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    }
+    handleListingUpdated({ ...l, not_interested: !l.not_interested })
+  }
+
   const count = mode === 'deduped' ? groups.length : listings.length
   const isEmpty = count === 0 && !loading
 
@@ -843,6 +860,13 @@ export default function Listings() {
                   </div>
                 </div>
 
+                {/* Not interested */}
+                <button
+                  onClick={e => { e.stopPropagation(); toggleNotInterested(l) }}
+                  className={`flex-shrink-0 text-sm leading-none transition-all ${l.not_interested ? 'text-red-500 drop-shadow-[0_0_6px_rgb(239,68,68)]' : 'text-slate-700 hover:text-slate-400'}`}
+                  title={l.not_interested ? 'Remove not interested' : 'Not interested'}
+                >✕</button>
+
                 {/* Star */}
                 <button
                   onClick={e => { e.stopPropagation(); toggleShortlist(l) }}
@@ -915,6 +939,12 @@ export default function Listings() {
                 </div>
 
                 <button
+                  onClick={e => { e.stopPropagation(); toggleNotInterested(rep) }}
+                  className={`flex-shrink-0 text-sm leading-none transition-all ${rep.not_interested ? 'text-red-500 drop-shadow-[0_0_6px_rgb(239,68,68)]' : 'text-slate-700 hover:text-slate-400'}`}
+                  title={rep.not_interested ? 'Remove not interested' : 'Not interested'}
+                >✕</button>
+
+                <button
                   onClick={e => { e.stopPropagation(); toggleShortlist(rep) }}
                   className={`flex-shrink-0 text-base leading-none transition-colors ${rep.shortlisted ? 'text-amber-400 hover:text-amber-300' : 'text-slate-700 hover:text-slate-400'}`}
                 >
@@ -934,6 +964,7 @@ export default function Listings() {
           onClose={() => setSelected(null)}
           onUpdated={handleListingUpdated}
           onShortlistToggle={toggleShortlist}
+          onNotInterestedToggle={toggleNotInterested}
         />
       )}
     </div>

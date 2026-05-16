@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from store.db import init_db
-from api import configs, listings, shortlist, stats, scrape, variants, specs
+from api import configs, listings, shortlist, not_interested, stats, scrape, variants, specs
 
 app = FastAPI(title="scrapper", version="0.1.0")
 
@@ -25,6 +25,7 @@ def on_startup():
 app.include_router(configs.router, prefix="/api/configs", tags=["configs"])
 app.include_router(listings.router, prefix="/api/listings", tags=["listings"])
 app.include_router(shortlist.router, prefix="/api/shortlist", tags=["shortlist"])
+app.include_router(not_interested.router, prefix="/api/not-interested", tags=["not_interested"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(scrape.router, prefix="/api/scrape", tags=["scrape"])
 app.include_router(variants.router, prefix="/api/variants", tags=["variants"])
