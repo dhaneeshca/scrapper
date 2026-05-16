@@ -123,15 +123,15 @@ function VariantManager({ make, model }: { make: string; model: string }) {
         onClick={() => !loading && (open ? setOpen(false) : suggest())}
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-300 font-medium">Variant Normalizer</span>
+          <span className="text-sm text-slate-300 font-medium">Fix Variant Names</span>
           <span className="text-xs text-slate-500">
-            {make} {model} — merge duplicate variant strings
+            {make} {model} — group similar names into one
           </span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
             <label className="text-xs text-slate-500" onClick={e => e.stopPropagation()}>
-              Threshold
+              Match sensitivity
             </label>
             <input
               type="number"
@@ -145,7 +145,7 @@ function VariantManager({ make, model }: { make: string; model: string }) {
             <span className="text-xs text-slate-600">%</span>
           </div>
           <span className="text-slate-500 text-xs">
-            {loading ? 'Analysing…' : open ? '▲' : '▶ Analyse'}
+            {loading ? 'Analyzing…' : open ? '▲' : '▶ Analyze'}
           </span>
         </div>
       </button>
@@ -170,7 +170,7 @@ function VariantManager({ make, model }: { make: string; model: string }) {
 
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-3">
             <div className="text-xs text-slate-500">
-              {nonSingletons.length} groups to merge · {singletons.length} unique
+              {nonSingletons.length} groups · {singletons.length} already unique
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -178,7 +178,7 @@ function VariantManager({ make, model }: { make: string; model: string }) {
                 disabled={loading}
                 className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 disabled:opacity-40"
               >
-                re-analyse
+                re-analyze
               </button>
               <button
                 onClick={apply}
@@ -201,7 +201,7 @@ function VariantManager({ make, model }: { make: string; model: string }) {
                   className={`px-4 py-3 transition-opacity ${isSkipped ? 'opacity-40' : ''} ${isLow && !isSkipped ? 'border-l-2 border-amber-700/60' : ''}`}
                 >
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs text-slate-500 w-16 shrink-0">canonical</span>
+                    <span className="text-xs text-slate-500 w-16 shrink-0">Standard name</span>
                     <input
                       value={canonicals[key] ?? ''}
                       onChange={e => setCanonicals(prev => ({ ...prev, [key]: e.target.value }))}
@@ -210,10 +210,10 @@ function VariantManager({ make, model }: { make: string; model: string }) {
                       placeholder="Canonical variant name…"
                     />
                     {!isSkipped && isLow && (
-                      <span className="text-xs text-amber-500/80 shrink-0">low confidence</span>
+                      <span className="text-xs text-amber-500/80 shrink-0">review recommended</span>
                     )}
                     {isSkipped && (
-                      <span className="text-xs text-slate-600 shrink-0">skipped</span>
+                      <span className="text-xs text-slate-600 shrink-0">excluded</span>
                     )}
                     <button
                       onClick={() => setCanonicals(prev => ({

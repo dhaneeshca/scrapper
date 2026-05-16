@@ -756,11 +756,15 @@ export default function Listings() {
           <div className={`flex items-center gap-1.5 ${mode === 'deduped' ? 'opacity-30 pointer-events-none' : ''}`}>
             <label className="text-xs text-slate-500">Sort</label>
             <select value={filters.sort_by} onChange={e => setF('sort_by', e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 outline-none">
-              {['price', 'km_driven', 'year', 'scraped_at', 'last_seen_at'].map(v => <option key={v} value={v}>{v.replace('_', ' ')}</option>)}
+              <option value="price">Price</option>
+              <option value="km_driven">Mileage</option>
+              <option value="year">Year</option>
+              <option value="scraped_at">Date added</option>
+              <option value="last_seen_at">Last seen</option>
             </select>
             <select value={filters.sort_dir} onChange={e => setF('sort_dir', e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 outline-none">
-              <option value="asc">↑ asc</option>
-              <option value="desc">↓ desc</option>
+              <option value="asc">Low → High</option>
+              <option value="desc">High → Low</option>
             </select>
           </div>
           <div className="ml-auto flex gap-2">

@@ -202,7 +202,6 @@ function ScrapeLog({ events }: { events: ProgressEvent[] }) {
       {runId && (
         <div className="text-slate-600 pb-1 mb-1 border-b border-slate-800">
           run <span className="text-slate-500">{runId}</span>
-          <span className="ml-2 text-slate-700">· grep [{runId}] log.txt</span>
         </div>
       )}
       {events.map((ev, i) => {
@@ -214,16 +213,16 @@ function ScrapeLog({ events }: { events: ProgressEvent[] }) {
             <div key={i} className="flex items-center gap-2 text-slate-500">
               <span className={`w-20 shrink-0 ${srcColor}`}>{ev.source}</span>
               <span className="animate-pulse">●</span>
-              <span>scraping {regions}…</span>
+              <span>collecting from {regions}…</span>
             </div>
           )
         }
         if (ev.type === 'scraper_done') {
           const parts = []
-          if (ev.inserted) parts.push(<span key="i" className="text-emerald-400">↑{ev.inserted}</span>)
-          if (ev.updated) parts.push(<span key="u" className="text-slate-400">↻{ev.updated}</span>)
-          if (ev.price_changes) parts.push(<span key="p" className="text-amber-400">±{ev.price_changes}</span>)
-          if (!parts.length) parts.push(<span key="n" className="text-slate-600">no changes</span>)
+          if (ev.inserted) parts.push(<span key="i" className="text-emerald-400">+{ev.inserted} new</span>)
+          if (ev.updated) parts.push(<span key="u" className="text-slate-400">{ev.updated} updated</span>)
+          if (ev.price_changes) parts.push(<span key="p" className="text-amber-400">{ev.price_changes} price changes</span>)
+          if (!parts.length) parts.push(<span key="n" className="text-slate-600">no new listings</span>)
           return (
             <div key={i} className="flex items-center gap-2">
               <span className={`w-20 shrink-0 ${srcColor}`}>{ev.source}</span>
@@ -247,11 +246,11 @@ function ScrapeLog({ events }: { events: ProgressEvent[] }) {
           return (
             <div key={i} className="flex items-center gap-2 pt-1 mt-1 border-t border-slate-800 text-slate-300">
               <span className="w-20 shrink-0 text-slate-500">total</span>
-              {total_new > 0 && <span className="text-emerald-400">↑{total_new} new</span>}
-              {total_upd > 0 && <span>↻{total_upd} updated</span>}
-              {(ev.price_changes ?? 0) > 0 && <span className="text-amber-400">±{ev.price_changes} price changes</span>}
+              {total_new > 0 && <span className="text-emerald-400">+{total_new} new</span>}
+              {total_upd > 0 && <span>{total_upd} updated</span>}
+              {(ev.price_changes ?? 0) > 0 && <span className="text-amber-400">{ev.price_changes} price changes</span>}
               {errs.length > 0 && <span className="text-red-400">{errs.length} error{errs.length > 1 ? 's' : ''}</span>}
-              {total_new === 0 && total_upd === 0 && errs.length === 0 && <span className="text-slate-600">nothing changed</span>}
+              {total_new === 0 && total_upd === 0 && errs.length === 0 && <span className="text-slate-600">no new listings</span>}
             </div>
           )
         }
@@ -346,12 +345,12 @@ export default function SearchConfigs() {
   return (
     <div className="max-w-3xl space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-slate-200 font-medium">Search Configs</h2>
+        <h2 className="text-slate-200 font-medium">Searches</h2>
         <button
           onClick={() => setCreating(true)}
           className="bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm px-3 py-1.5 rounded"
         >
-          + New config
+          + New Search
         </button>
       </div>
 
@@ -428,10 +427,10 @@ export default function SearchConfigs() {
                             const last = scrapeLog[`${c.id}:${src}`].slice(-1)[0]
                             return (
                               <span className="text-xs font-mono text-slate-500 flex gap-2">
-                                {(last.inserted ?? 0) > 0 && <span className="text-emerald-400">↑{last.inserted}</span>}
-                                {(last.updated ?? 0) > 0 && <span>↻{last.updated}</span>}
-                                {(last.price_changes ?? 0) > 0 && <span className="text-amber-400">±{last.price_changes}</span>}
-                                {!last.inserted && !last.updated && <span>no changes</span>}
+                                {(last.inserted ?? 0) > 0 && <span className="text-emerald-400">+{last.inserted} new</span>}
+                                {(last.updated ?? 0) > 0 && <span>{last.updated} updated</span>}
+                                {(last.price_changes ?? 0) > 0 && <span className="text-amber-400">{last.price_changes} price changes</span>}
+                                {!last.inserted && !last.updated && <span>no new listings</span>}
                               </span>
                             )
                           })()}
@@ -458,27 +457,27 @@ export default function SearchConfigs() {
                     {scraping.has(c.id) ? (
                       <span className="flex items-center gap-1">
                         <span className="inline-block w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
-                        all…
+                        fetching…
                       </span>
-                    ) : 'scrape all'}
+                    ) : 'fetch all'}
                   </button>
                   <button
                     onClick={() => toggle(c.id)}
                     className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800"
                   >
-                    {c.is_active ? 'pause' : 'resume'}
+                    {c.is_active ? 'Pause' : 'Resume'}
                   </button>
                   <button
                     onClick={() => setEditing(c.id)}
                     className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800"
                   >
-                    edit
+                    Edit
                   </button>
                   <button
                     onClick={() => remove(c.id)}
                     className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-800"
                   >
-                    del
+                    delete
                   </button>
                 </div>
               </div>
@@ -489,7 +488,7 @@ export default function SearchConfigs() {
 
       {configs.length === 0 && !creating && (
         <div className="text-slate-500 text-sm text-center py-12 border border-dashed border-slate-800 rounded-lg">
-          No search configs yet. Create one to start scraping.
+          No searches yet. Add one to start collecting listings.
         </div>
       )}
     </div>

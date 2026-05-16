@@ -51,7 +51,7 @@ const SOURCE_COLORS: Record<string, string> = {
 const COMPARE_FIELDS: { label: string; render: (l: Listing) => string | null }[] = [
   { label: 'Price', render: l => fmt_price(l.price) },
   { label: 'Year', render: l => l.year?.toString() ?? '—' },
-  { label: 'KM', render: l => fmt_km(l.km_driven) },
+  { label: 'Mileage', render: l => fmt_km(l.km_driven) },
   { label: 'Variant', render: l => l.variant || '—' },
   { label: 'Fuel', render: l => l.fuel_type || '—' },
   { label: 'Transmission', render: l => l.transmission || '—' },

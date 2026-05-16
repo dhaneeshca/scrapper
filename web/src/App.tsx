@@ -3,16 +3,14 @@ import Listings from './pages/Listings'
 import SearchConfigs from './pages/SearchConfigs'
 import Stats from './pages/Stats'
 import Shortlist from './pages/Shortlist'
-import CarInfo from './pages/CarInfo'
 
-type Tab = 'listings' | 'configs' | 'stats' | 'shortlist' | 'info'
+type Tab = 'listings' | 'configs' | 'stats' | 'shortlist'
 
 const TAB_LABELS: Record<Tab, string> = {
-  listings: 'listings',
-  configs: 'search configs',
-  stats: 'market stats',
-  shortlist: 'shortlist',
-  info: 'car info',
+  listings: 'Listings',
+  configs: 'Searches',
+  stats: 'Market',
+  shortlist: 'Saved',
 }
 
 export default function App() {
@@ -44,7 +42,6 @@ export default function App() {
         {tab === 'configs' && <SearchConfigs />}
         {tab === 'stats' && <Stats />}
         {tab === 'shortlist' && <Shortlist />}
-        {tab === 'info' && <CarInfo />}
       </main>
     </div>
   )
