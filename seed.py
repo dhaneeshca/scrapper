@@ -11,6 +11,7 @@ init_db()
 _TN_CITIES = [
     "Chennai", "Coimbatore", "Trichy", "Madurai",
     "Salem", "Tirunelveli", "Vellore", "Erode", "Thanjavur", "Tiruppur",
+    "Hosur", "Dindigul", "Thoothukudi", "Nagercoil", "Kanchipuram",
 ]
 
 with get_session() as s:
