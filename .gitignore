@@ -1,0 +1,31 @@
+# env
+.env
+
+# data (gitignored — env-specific, may contain personal search configs)
+data/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# playwright
+playwright/.local-browsers/
+
+# node / frontend
+web/node_modules/
+web/dist/
+web/.parcel-cache/
+
+# logs
+log.txt
+
+# os
+.DS_Store
