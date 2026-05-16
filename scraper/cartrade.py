@@ -44,10 +44,24 @@ _CITY_MAP: dict[str, tuple[str, int]] = {
     "hyderabad":  ("hyderabad",  105),
     "kolkata":    ("kolkata",    198),
     "ahmedabad":  ("ahmedabad",  128),
-    "coimbatore": ("coimbatore", 177),
-    "trichy":     ("chennai",    176),   # no CarTrade city; fall back to Chennai
-    "madurai":    ("chennai",    176),
-    "tiruchirappalli": ("chennai", 176),
+    # Tamil Nadu
+    "coimbatore":      ("coimbatore",      177),
+    "dindigul":        ("dindigul",        181),
+    "madurai":         ("madurai",         184),
+    "salem":           ("salem",           191),
+    "thanjavur":       ("thanjavur",       193),
+    "tiruchirappalli": ("tiruchirappalli", 194),
+    "trichy":          ("tiruchirappalli", 194),
+    "tirunelveli":     ("tirunelveli",     195),
+    "vellore":         ("vellore",         304),
+    "erode":           ("erode",           340),
+    "nagercoil":       ("nagercoil",       342),
+    "namakkal":        ("namakkal",        343),
+    "tiruppur":        ("tiruppur",        347),
+    "kanchipuram":     ("kancheepuram",    474),
+    "kancheepuram":    ("kancheepuram",    474),
+    "hosur":           ("hosur",           534),
+    "thoothukudi":     ("thoothukudi",     1535),
 }
 
 # Process-level cache: (make_lower, model_lower) → (make_id, root_id)

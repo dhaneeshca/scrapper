@@ -24,6 +24,12 @@ _UA = (
 )
 _PAGE_DELAY = 1.5
 
+# Cities Spinny operates in (from sitemap verification)
+_SUPPORTED_CITIES: set[str] = {
+    "chennai", "coimbatore", "tiruchirappalli", "trichy",
+    "salem", "vellore", "erode", "tiruppur", "hosur",
+}
+
 
 def _get_json(url: str) -> Optional[dict]:
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
@@ -56,6 +62,9 @@ class SpinnyScraper(Scraper):
 
         for city in cities:
             city_slug = city.lower().replace(" ", "-")
+            if city and city_slug not in _SUPPORTED_CITIES:
+                _log.debug("spinny skipping unsupported city: %s", city)
+                continue
             self._fetch_city(make, model_slug, city_slug, year_min, year_max, budget_max, results)
 
         return results

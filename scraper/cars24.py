@@ -28,6 +28,13 @@ _CITY_SLUGS: dict[str, str] = {
     "trichy": "tiruchirappalli",
     "tiruchirappalli": "tiruchirappalli",
 }
+
+# Cities where Cars24 has physical hubs — others timeout with no cards
+_SUPPORTED_CITIES: set[str] = {
+    "chennai", "coimbatore", "tiruchirappalli", "trichy",
+    "madurai", "salem", "erode", "hosur", "tirunelveli",
+    "vellore", "tiruppur", "dindigul", "namakkal",
+}
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -176,6 +183,10 @@ class Cars24Scraper(Scraper):
             page = ctx.new_page()
 
             for city in cities:
+                slug = _CITY_SLUGS.get(city.lower(), city.lower().replace(" ", "-"))
+                if city and slug not in _SUPPORTED_CITIES:
+                    _log.debug("cars24 skipping unsupported city: %s", city)
+                    continue
                 url = self._search_url(make, model, city)
                 _log.info("scraping %s", url)
                 self._scrape_page(page, url, make, model, city, year_min, year_max, budget_max, results)
