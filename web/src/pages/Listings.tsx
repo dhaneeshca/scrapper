@@ -889,19 +889,26 @@ export default function Listings() {
         {/* Tag filters */}
         <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
           <span className="text-xs text-slate-500 mr-0.5">Tags</span>
-          {TAG_DEFS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => toggleTag(t.key)}
-              className={`text-[11px] px-2 py-0.5 rounded font-medium border transition-colors ${
-                activeTags.has(t.key)
-                  ? t.activeCls
-                  : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-300'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+          {TAG_DEFS.map(t => {
+            const needsPriceRange = t.key === 'deal' || t.key === 'below'
+            const disabled = needsPriceRange && Object.keys(priceRangeMap).length === 0
+            return (
+              <button
+                key={t.key}
+                onClick={() => !disabled && toggleTag(t.key)}
+                title={disabled ? 'Select a car in the filter above to enable' : undefined}
+                className={`text-[11px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                  disabled
+                    ? 'bg-slate-900 text-slate-700 border-slate-800 cursor-not-allowed'
+                    : activeTags.has(t.key)
+                      ? t.activeCls
+                      : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-300'
+                }`}
+              >
+                {t.label}
+              </button>
+            )
+          })}
           {activeTags.size > 0 && (
             <button onClick={() => setActiveTags(new Set())} className="text-[11px] text-slate-600 hover:text-slate-400 ml-1">
               clear
