@@ -143,8 +143,9 @@ class CarwaleScraper(Scraper):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
-        cities = regions if regions else [""]
+        cities = list(city_configs.keys()) if city_configs else (regions if regions else [""])
         results: list[RawListing] = []
 
         with sync_playwright() as pw:

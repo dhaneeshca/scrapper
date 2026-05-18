@@ -1,14 +1,14 @@
-# Plan
+# Architecture & Design
 
 ## Tech Stack
 
 | Layer | Choice | Reason |
 |---|---|---|
 | Language | Python 3.11+ | Best scraping ecosystem |
-| Scraping | Playwright (headless Chromium) | JS-rendered pages on CarDekho, Cars24 |
-| Storage | PostgreSQL (local) via SQLAlchemy | Already running locally, JSONB for arrays, easy to query |
+| Scraping | Playwright (headless Chromium) | JS-rendered pages on CarDekho, Cars24, CarTrade |
+| Storage | PostgreSQL (local) via SQLAlchemy | JSONB for arrays, easy ad-hoc queries |
 | Backend API | FastAPI | Async, auto-docs, minimal boilerplate |
-| Frontend | React + Tailwind | Clean, fast to build |
+| Frontend | React + Vite + Tailwind | Fast to build, dark-theme UI |
 
 ---
 
@@ -19,125 +19,108 @@
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| name | TEXT | "My Verna Hunt" |
-| make | TEXT | "Hyundai" |
-| model | TEXT | "Verna" |
-| variants | JSONB | `["S", "SX", "SX(O)"]` |
+| name | TEXT | "Skoda Slavia Hunt" |
+| make | TEXT | "Skoda" |
+| model | TEXT | "Slavia" |
+| variants | JSONB | `["Style", "Ambition"]` — optional filter |
 | year_min | INTEGER | |
 | year_max | INTEGER | |
-| fuel_types | JSONB | `["Petrol"]` |
-| transmissions | JSONB | `["Manual", "Automatic"]` |
-| budget_max | INTEGER | in INR |
-| regions | JSONB | `["Bangalore", "Chennai"]` |
+| budget_max | INTEGER | INR |
+| regions | JSONB | `["tamil-nadu", "karnataka"]` — state keys |
 | is_active | BOOLEAN | pause without deleting |
 | created_at | TIMESTAMPTZ | |
+
+### `source_city_configs`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| state_name | TEXT | "Tamil Nadu" |
+| state_key | TEXT | "tamil-nadu" |
+| city_name | TEXT | "Chennai" |
+| city_key | TEXT | "chennai" |
+| source | TEXT | olx / cartrade / cars24 / spinny / carwale / cardekho |
+| is_supported | BOOLEAN | whether this source scrapes this city |
+| source_config | JSONB | source-specific metadata (OLX location IDs, CarTrade city IDs, etc.) |
+
+One row per `(city_key, source)` pair. Engine loads all rows for requested states and passes them to scrapers.
 
 ### `listings`
 
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| source | TEXT | cardekho / carwale / cars24 / olx |
+| source | TEXT | cardekho / carwale / cars24 / olx / spinny / cartrade |
 | source_id | TEXT | original ID on the source site |
 | url | TEXT | |
-| make | TEXT | |
-| model | TEXT | |
-| variant | TEXT | normalized |
+| make, model, variant | TEXT | raw scraped values |
+| variant_canonical | TEXT | normalised name from variant_aliases |
 | year | INTEGER | |
 | km_driven | INTEGER | |
 | fuel_type | TEXT | |
 | transmission | TEXT | |
 | price | INTEGER | INR |
-| location_city | TEXT | |
-| location_state | TEXT | |
+| location_city, location_state | TEXT | |
 | seller_type | TEXT | dealer / individual |
 | images | JSONB | array of image URLs |
-| description | TEXT | |
-| listed_at | DATE | date shown on site |
-| scraped_at | TIMESTAMPTZ | |
-| last_seen_at | TIMESTAMPTZ | |
+| scraped_at, last_seen_at | TIMESTAMPTZ | |
 | is_active | BOOLEAN | false when listing disappears |
-| dedup_key | TEXT | for cross-site grouping |
+| is_manually_edited | BOOLEAN | prevents canonical override after manual edit |
+| dedup_key | TEXT | `make_model_year_kmbucket_city` |
 | config_id | UUID FK | → search_configs |
 
 ### `price_history`
 
 | Column | Type | Notes |
 |---|---|---|
-| id | UUID PK | |
 | listing_id | UUID FK | → listings |
 | price | INTEGER | |
 | observed_at | TIMESTAMPTZ | |
 
-### `shortlist`
+### `shortlist` / `not_interested`
+
+| Column | Type |
+|---|---|
+| listing_id | UUID PK FK |
+| notes | TEXT |
+| added_at | TIMESTAMPTZ |
+
+### `variant_aliases`
 
 | Column | Type | Notes |
 |---|---|---|
-| listing_id | UUID PK FK | → listings |
-| notes | TEXT | |
-| added_at | TIMESTAMPTZ | |
+| make, model | TEXT | scopes alias to a model |
+| raw_variant | TEXT | scraped string |
+| canonical_variant | TEXT | normalised string |
+| confirmed | BOOLEAN | only confirmed aliases are applied |
 
 ---
 
 ## Deduplication
 
-Dedup key = `{make}_{model}_{year}_{km_bucket}_{city}` where km_bucket rounds km_driven to the nearest 5,000.
+`dedup_key = {make}_{model}_{year}_{km_bucket}_{city}` where `km_bucket` rounds `km_driven` to nearest 5,000.
 
-Listings that share a dedup_key are the same physical car on multiple platforms. The UI merges them into one row with a "N sources" badge, showing the lowest price.
-
----
-
-## Directory Structure
-
-```
-scrapper/
-├── scraper/
-│   ├── base.py        # Abstract Scraper: search(config) → List[RawListing]
-│   ├── engine.py      # Runs all scrapers, handles DB upsert + price history
-│   ├── cardekho.py
-│   ├── carwale.py
-│   ├── cars24.py
-│   └── olx.py
-├── store/
-│   ├── db.py          # SQLAlchemy engine + session
-│   └── models.py      # ORM models
-├── api/
-│   ├── main.py        # FastAPI app, CORS, router mount
-│   ├── listings.py    # GET /listings, GET /listings/deduped, GET /listings/:id
-│   ├── configs.py     # CRUD /configs
-│   ├── shortlist.py   # POST/DELETE /shortlist, GET /shortlist
-│   ├── stats.py       # GET /stats/price-range
-│   └── scrape.py      # POST /scrape (manual trigger)
-├── web/
-│   └── src/
-│       ├── App.tsx
-│       └── pages/
-│           ├── Listings.tsx       # Main table + filters
-│           ├── SearchConfigs.tsx  # Manage search configs
-│           ├── Shortlist.tsx      # Saved + comparison view
-│           └── Stats.tsx          # Variant × year price heatmap
-├── data/              # gitignored (seed JSONs)
-├── problem.md
-├── plan.md
-├── progress.md
-├── requirements.txt
-├── .env.example
-├── .gitignore
-└── main.py            # Entry point: uvicorn + APScheduler
-```
+Listings sharing a dedup_key are the same physical car on multiple platforms. The "Unique cars" view merges them into one row showing the lowest price and all source badges.
 
 ---
 
-## Scraper Flow
+## Scraper City Config
 
-1. For each active `search_config`:
-   - Run each enabled scraper (CarDekho, Cars24, CarWale, OLX) sequentially
-   - 2–3 second delay between page fetches (rate limiting)
-2. Each scraper returns `List[RawListing]` (common schema)
-3. Engine upserts into `listings`:
-   - New listing → INSERT, log initial price in `price_history`
-   - Existing (matched by `source` + `source_id`) → UPDATE `price`, `last_seen_at`; if price changed → INSERT into `price_history`
-4. After each run, mark listings not seen as `is_active = false`
+The engine resolves `search_config.regions` (state keys) → cities via `source_city_configs`:
+
+```
+state_keys = config.regions              # e.g. ["tamil-nadu"]
+city_rows  = query(state_key.in_(...))   # all cities for those states
+city_configs = {city_key: {source: {is_supported, source_config}}}
+```
+
+Each scraper receives `city_configs` and uses it to decide:
+- **OLX**: deduplicate to unique states, use `location_id` from config
+- **CarTrade**: use `city_id` + `slug` from config
+- **Cars24 / Spinny**: check `is_supported` flag, use `slug` override if set
+- **CarWale / CardEkho**: build URL from city key, filter results to that city
+
+Fallback: if `city_configs` is `None` (DB not seeded), scrapers use hardcoded maps.
 
 ---
 
@@ -145,45 +128,55 @@ scrapper/
 
 | Site | Risk | Mitigation |
 |---|---|---|
-| CarDekho | Medium — JS rendered | Playwright, realistic UA |
-| Cars24 | Medium — JS rendered | Playwright, realistic UA |
-| CarWale | Low — mostly static | requests + BeautifulSoup fallback |
-| OLX | High — headless detection | playwright-stealth |
-| Spinny | Low — public JSON API | urllib, no browser |
-| CarTrade | Medium — JS hydration | Playwright, hash URL with makeId.rootId |
-
-If a site blocks: cache last result, flag in UI as "stale (last refreshed: X hours ago)".
+| CarDekho | Medium | Playwright, realistic UA, location filter |
+| Cars24 | Medium | Playwright, React hydration wait |
+| CarWale | Low | Playwright, anchor link scrape |
+| CarTrade | Medium | Playwright, hash URL trick |
+| Spinny | Low | Pure JSON API, urllib |
+| OLX | High | playwright-stealth for cookie init, then requests session |
 
 ---
 
-## Phases
+## Directory Structure
 
-### Phase 1 — Foundation + CarDekho
-- Postgres schema + SQLAlchemy models
-- Base scraper + Playwright setup
-- CarDekho scraper
-- FastAPI: configs CRUD + listings list
-- React UI: SearchConfig form, listings table
-- Manual scrape via POST /scrape
-
-### Phase 2 — All Sources
-- Cars24, CarWale, OLX scrapers
-- Source badge per listing row
-
-### Phase 3 — Deduplication
-- Dedup key on ingest
-- GET /listings/deduped grouped view
-- UI toggle: All listings vs Unique cars
-
-### Phase 4 — Variant Price Intelligence
-- GET /stats/price-range → variant × year breakdown
-- Stats page: price range table + listing counts
-
-### Phase 5 — Shortlist + Comparison
-- Shortlist toggle
-- Side-by-side comparison (up to 4 cars)
-- Notes per car
-
-### Phase 6 — Additional Sources
-- Spinny scraper: pure JSON API (`api.spinny.com/v3/api/listing/v6/`), no browser
-- CarTrade scraper: Playwright, hash URL `#city={cityId}&car={makeId}.{rootId}`, city IDs from radio buttons
+```
+scrapper/
+├── api/
+│   ├── main.py          FastAPI app, CORS, static file serving
+│   ├── listings.py      Listings CRUD + deduped view
+│   ├── configs.py       Search config CRUD
+│   ├── scrape.py        Scrape triggers + SSE stream
+│   ├── source_cities.py City-source config management
+│   ├── shortlist.py     Shortlist + not-interested
+│   ├── stats.py         Price range stats
+│   ├── specs.py         Car spec scraping
+│   └── variants.py      Variant alias management
+├── scraper/
+│   ├── base.py          Abstract Scraper
+│   ├── engine.py        Orchestration, upsert, dedup, price history
+│   ├── cardekho.py
+│   ├── cars24.py
+│   ├── carwale.py
+│   ├── cartrade.py
+│   ├── spinny.py
+│   └── olx.py
+├── store/
+│   ├── db.py            Engine, session, init_db (schema + migrations)
+│   └── models.py        ORM models
+├── web/
+│   └── src/
+│       ├── App.tsx
+│       ├── lib/
+│       │   └── constants.ts   Source colours, source list
+│       └── pages/
+│           ├── Listings.tsx
+│           ├── SearchConfigs.tsx
+│           ├── SourceCities.tsx
+│           ├── Shortlist.tsx
+│           └── Stats.tsx
+├── docs/
+├── seed.py
+├── main.py
+├── dev.py
+└── Makefile
+```

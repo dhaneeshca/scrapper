@@ -253,6 +253,7 @@ class CartradeScraper(Scraper):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
         ids = _lookup_ids(make, model)
         if not ids:
@@ -260,7 +261,7 @@ class CartradeScraper(Scraper):
             return []
 
         make_id, root_id = ids
-        cities = regions if regions else [""]
+        cities = list(city_configs.keys()) if city_configs else (regions if regions else [""])
         results: list[RawListing] = []
 
         with sync_playwright() as pw:
@@ -271,11 +272,23 @@ class CartradeScraper(Scraper):
 
             for city in cities:
                 city_lower = city.lower().strip()
-                city_info = _CITY_MAP.get(city_lower)
-                if not city_info:
-                    _log.warning("cartrade: unknown city '%s', skipping", city)
-                    continue
-                city_slug, city_id = city_info
+                if city_configs:
+                    ct = city_configs.get(city_lower, {}).get("cartrade", {})
+                    if not ct.get("is_supported"):
+                        _log.warning("cartrade: city '%s' not supported, skipping", city)
+                        continue
+                    sc = ct.get("source_config", {})
+                    city_slug = sc.get("slug")
+                    city_id = sc.get("city_id")
+                    if not city_slug or not city_id:
+                        _log.warning("cartrade: missing slug/city_id for '%s', skipping", city)
+                        continue
+                else:
+                    city_info = _CITY_MAP.get(city_lower)
+                    if not city_info:
+                        _log.warning("cartrade: unknown city '%s', skipping", city)
+                        continue
+                    city_slug, city_id = city_info
                 self._scrape_city(
                     page, city_slug, city_id, make_id, root_id,
                     make, model, year_min, year_max, budget_max, results,

@@ -7,6 +7,9 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 
+from sqlalchemy import cast
+from sqlalchemy.dialects.postgresql import JSONB
+
 from store.db import get_session
 from store.models import SearchConfig
 from scraper.engine import run_config
@@ -59,6 +62,23 @@ def scrape_source(config_id: str, source: str):
     result = run_config(config_id, source=source)
     _log.info("scrape source done — config=%s  source=%s  %s", config_id, source, result)
     return {"ok": True, **result}
+
+
+@router.post("/state/{state_key}")
+def scrape_by_state(state_key: str, background_tasks: BackgroundTasks):
+    """Trigger background scrape for all active configs that reference the given state."""
+    with get_session() as session:
+        configs = session.query(SearchConfig).filter(
+            SearchConfig.is_active.is_(True),
+            SearchConfig.regions.contains(cast([state_key], JSONB)),
+        ).all()
+        config_ids = [c.id for c in configs]
+    if not config_ids:
+        raise HTTPException(404, f"no active configs reference state '{state_key}'")
+    for cid in config_ids:
+        background_tasks.add_task(run_config, cid)
+    _log.info("scrape by state — state=%s  triggered=%d configs", state_key, len(config_ids))
+    return {"ok": True, "triggered": len(config_ids), "config_ids": config_ids}
 
 
 @router.get("/{config_id}/stream")

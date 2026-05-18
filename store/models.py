@@ -113,3 +113,20 @@ class CarSpec(Base):
     __table_args__ = (
         UniqueConstraint("make", "model", "variant", name="uq_car_specs_make_model_variant"),
     )
+
+
+class SourceCityConfig(Base):
+    __tablename__ = "source_city_configs"
+
+    id           = Column(String, primary_key=True, default=_uuid)
+    state_name   = Column(String, nullable=False)   # "Tamil Nadu"
+    state_key    = Column(String, nullable=False)   # "tamil-nadu"
+    city_name    = Column(String, nullable=False)   # "Chennai"
+    city_key     = Column(String, nullable=False)   # "chennai"
+    source       = Column(String, nullable=False)   # "olx" | "cartrade" | "cars24" | "spinny" | "carwale" | "cardekho"
+    is_supported = Column(Boolean, nullable=False, default=False)
+    source_config = Column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("city_key", "source", name="uq_source_city_config"),
+    )

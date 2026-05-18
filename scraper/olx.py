@@ -179,12 +179,23 @@ class OLXScraper(Scraper):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
         states_seen: dict[str, tuple[str, str]] = {}  # state_key → (slug, loc_id)
-        for city in (regions or []):
-            state_key = _CITY_TO_STATE.get(city.lower())
-            if state_key and state_key not in states_seen:
-                states_seen[state_key] = _STATES[state_key]
+        if city_configs:
+            for city_key, srcs in city_configs.items():
+                olx = srcs.get("olx", {})
+                if not olx.get("is_supported"):
+                    continue
+                sc = olx.get("source_config", {})
+                sk = sc.get("state_key")
+                if sk and sk not in states_seen:
+                    states_seen[sk] = (sc.get("slug", sk), sc.get("location_id", ""))
+        else:
+            for city in (regions or []):
+                state_key = _CITY_TO_STATE.get(city.lower())
+                if state_key and state_key not in states_seen:
+                    states_seen[state_key] = _STATES[state_key]
 
         if not states_seen:
             # Nationwide fallback — no location filter, no HTML init URL

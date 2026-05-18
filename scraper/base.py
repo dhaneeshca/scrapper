@@ -38,4 +38,5 @@ class Scraper(ABC):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]: ...

@@ -173,8 +173,9 @@ class Cars24Scraper(Scraper):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
-        cities = regions if regions else [""]
+        cities = list(city_configs.keys()) if city_configs else (regions if regions else [""])
         results: list[RawListing] = []
 
         with sync_playwright() as pw:
@@ -183,11 +184,18 @@ class Cars24Scraper(Scraper):
             page = ctx.new_page()
 
             for city in cities:
-                slug = _CITY_SLUGS.get(city.lower(), city.lower().replace(" ", "-"))
-                if city and slug not in _SUPPORTED_CITIES:
-                    _log.debug("cars24 skipping unsupported city: %s", city)
-                    continue
-                url = self._search_url(make, model, city)
+                if city_configs:
+                    c24 = city_configs.get(city.lower(), {}).get("cars24", {})
+                    if city and not c24.get("is_supported"):
+                        _log.debug("cars24 skipping unsupported city: %s", city)
+                        continue
+                    slug = c24.get("source_config", {}).get("slug") or city.lower().replace(" ", "-")
+                else:
+                    slug = _CITY_SLUGS.get(city.lower(), city.lower().replace(" ", "-"))
+                    if city and slug not in _SUPPORTED_CITIES:
+                        _log.debug("cars24 skipping unsupported city: %s", city)
+                        continue
+                url = self._search_url(make, model, city, slug)
                 _log.info("scraping %s", url)
                 self._scrape_page(page, url, make, model, city, year_min, year_max, budget_max, results)
                 time.sleep(_PAGE_DELAY)
@@ -196,12 +204,12 @@ class Cars24Scraper(Scraper):
 
         return results
 
-    def _search_url(self, make: str, model: str, city: str) -> str:
+    def _search_url(self, make: str, model: str, city: str, city_slug: str = "") -> str:
         parts = [_slug(make), _slug(model)]
         base = f"{_BASE}/buy-used-{'-'.join(parts)}-cars"
         if city:
-            city_slug = _CITY_SLUGS.get(city.lower(), _slug(city))
-            return f"{base}-{city_slug}/"
+            slug = city_slug or _CITY_SLUGS.get(city.lower(), _slug(city))
+            return f"{base}-{slug}/"
         return f"{base}/"
 
     def _scrape_page(

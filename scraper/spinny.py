@@ -55,16 +55,23 @@ class SpinnyScraper(Scraper):
         year_min: int,
         year_max: int,
         budget_max: int,
+        city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
-        cities = regions if regions else [""]
+        cities = list(city_configs.keys()) if city_configs else (regions if regions else [""])
         model_slug = model.lower().replace(" ", "-")
         results: list[RawListing] = []
 
         for city in cities:
             city_slug = city.lower().replace(" ", "-")
-            if city and city_slug not in _SUPPORTED_CITIES:
-                _log.debug("spinny skipping unsupported city: %s", city)
-                continue
+            if city_configs:
+                sp = city_configs.get(city.lower(), {}).get("spinny", {})
+                if city and not sp.get("is_supported"):
+                    _log.debug("spinny skipping unsupported city: %s", city)
+                    continue
+            else:
+                if city and city_slug not in _SUPPORTED_CITIES:
+                    _log.debug("spinny skipping unsupported city: %s", city)
+                    continue
             self._fetch_city(make, model_slug, city_slug, year_min, year_max, budget_max, results)
 
         return results

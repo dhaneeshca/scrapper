@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from store.db import init_db
-from api import configs, listings, shortlist, not_interested, stats, scrape, variants, specs
+from api import configs, listings, shortlist, not_interested, stats, scrape, variants, specs, source_cities
 
 app = FastAPI(title="scrapper", version="0.1.0")
 
@@ -30,6 +30,7 @@ app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(scrape.router, prefix="/api/scrape", tags=["scrape"])
 app.include_router(variants.router, prefix="/api/variants", tags=["variants"])
 app.include_router(specs.router, prefix="/api/specs", tags=["specs"])
+app.include_router(source_cities.router, prefix="/api/source-cities", tags=["source_cities"])
 
 # Serve the built React app when web/dist exists (production / `make run`)
 _DIST = os.path.join(os.path.dirname(__file__), "..", "web", "dist")

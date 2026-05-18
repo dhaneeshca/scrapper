@@ -610,6 +610,8 @@ export default function Listings() {
     p.set('limit', '300')
 
     if (currentMode === 'deduped') {
+      if (filters.fuel_type) p.set('fuel_type', filters.fuel_type)
+      if (filters.transmission) p.set('transmission', filters.transmission)
       fetch(`/api/listings/deduped?${p}`)
         .then(r => r.json())
         .then(setGroups)
@@ -740,7 +742,7 @@ export default function Listings() {
               {options.variants.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
-          <div className={mode === 'deduped' ? 'opacity-30 pointer-events-none' : ''}>
+          <div>
             <label className="text-xs text-slate-500 mb-1 block">Fuel</label>
             <AutocompleteInput value={filters.fuel_type} onChange={v => setF('fuel_type', v)} placeholder="Petrol / Diesel" options={options.fuel_types} />
           </div>
@@ -763,7 +765,7 @@ export default function Listings() {
               />
             </div>
           ))}
-          <div className={mode === 'deduped' ? 'opacity-30 pointer-events-none' : ''}>
+          <div>
             <label className="text-xs text-slate-500 mb-1 block">Transmission</label>
             <AutocompleteInput value={filters.transmission} onChange={v => setF('transmission', v)} placeholder="Manual…" options={options.transmissions} />
           </div>

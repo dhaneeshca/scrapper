@@ -196,6 +196,8 @@ def deduped_listings(
     price_min: Optional[int] = None,
     price_max: Optional[int] = None,
     km_max: Optional[int] = None,
+    fuel_type: Optional[str] = None,
+    transmission: Optional[str] = None,
     city: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = Query(200, le=500),
@@ -221,6 +223,10 @@ def deduped_listings(
             sq = sq.filter(Listing.price <= price_max)
         if km_max:
             sq = sq.filter(Listing.km_driven <= km_max)
+        if fuel_type:
+            sq = sq.filter(func.lower(Listing.fuel_type) == fuel_type.lower())
+        if transmission:
+            sq = sq.filter(func.lower(Listing.transmission) == transmission.lower())
         if city:
             sq = sq.filter(func.lower(Listing.location_city).contains(city.lower()))
         if q:

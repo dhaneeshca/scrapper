@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Callable
 import log as applog
 from store.db import get_session
-from store.models import Listing, PriceHistory, SearchConfig, VariantAlias
+from store.models import Listing, PriceHistory, SearchConfig, SourceCityConfig, VariantAlias
 from scraper.base import RawListing
 from scraper.cardekho import CardekhoScraper
 from scraper.cars24 import Cars24Scraper
@@ -42,6 +42,21 @@ def run_config(config_id: str, source: str | None = None, on_progress: ProgressC
         year_min = config.year_min or 0
         year_max = config.year_max or 9999
         budget_max = config.budget_max or 999_999_999
+
+    state_keys = [r.lower() for r in regions]
+    with get_session() as session:
+        city_rows = (
+            session.query(SourceCityConfig)
+            .filter(SourceCityConfig.state_key.in_(state_keys))
+            .all()
+        )
+    # city_key → source → {is_supported, source_config}
+    city_configs: dict[str, dict] = {}
+    for row in city_rows:
+        city_configs.setdefault(row.city_key, {})[row.source] = {
+            "is_supported": row.is_supported,
+            "source_config": row.source_config or {},
+        }
 
     _log.info(
         "run start — config=%s  %s %s  regions=%s  source=%s  budget_max=%s",
@@ -84,6 +99,7 @@ def run_config(config_id: str, source: str | None = None, on_progress: ProgressC
                 year_min=year_min,
                 year_max=year_max,
                 budget_max=budget_max,
+                city_configs=city_configs or None,
             )
         except Exception as exc:
             msg = f"{scraper.name}: {exc}"

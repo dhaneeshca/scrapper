@@ -1,4 +1,47 @@
 import { useEffect, useRef, useState } from 'react'
+import { SOURCE_COLORS } from '../lib/constants'
+
+interface StateOption {
+  state_name: string
+  state_key: string
+  city_count: number
+}
+
+function StateMultiSelect({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [options, setOptions] = useState<StateOption[]>([])
+  useEffect(() => {
+    fetch('/api/source-cities/states').then(r => r.json()).then(setOptions)
+  }, [])
+
+  const toggle = (key: string) =>
+    onChange(value.includes(key) ? value.filter(k => k !== key) : [...value, key])
+
+  return (
+    <div>
+      <label className="text-xs text-slate-400 mb-1 block">States</label>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(opt => (
+          <button
+            key={opt.state_key}
+            type="button"
+            onClick={() => toggle(opt.state_key)}
+            className={`text-xs px-2 py-1 rounded border transition-colors ${
+              value.includes(opt.state_key)
+                ? 'bg-blue-900 border-blue-600 text-blue-200'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+            }`}
+          >
+            {opt.state_name}
+            <span className="ml-1.5 opacity-50">{opt.city_count}</span>
+          </button>
+        ))}
+        {options.length === 0 && (
+          <span className="text-xs text-slate-600">No states configured — add cities in the States tab first</span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface Config {
   id: string
@@ -142,7 +185,7 @@ function ConfigForm({
       <TagInput label="Variants" value={form.variants} onChange={v => set('variants', v)} />
       <TagInput label="Fuel types" value={form.fuel_types} onChange={v => set('fuel_types', v)} />
       <TagInput label="Transmissions" value={form.transmissions} onChange={v => set('transmissions', v)} />
-      <TagInput label="Regions / Cities" value={form.regions} onChange={v => set('regions', v)} />
+      <StateMultiSelect value={form.regions} onChange={v => set('regions', v)} />
 
       <div className="flex gap-2 pt-1">
         <button
@@ -178,14 +221,6 @@ interface ProgressEvent {
   message?: string
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-  cardekho: 'text-orange-400',
-  carwale: 'text-blue-400',
-  cars24: 'text-green-400',
-  olx: 'text-purple-400',
-  spinny: 'text-cyan-400',
-  cartrade: 'text-rose-400',
-}
 
 // ── Live scrape log ────────────────────────────────────────────────────────────
 
@@ -265,6 +300,7 @@ function ScrapeLog({ events }: { events: ProgressEvent[] }) {
 
 export default function SearchConfigs() {
   const [configs, setConfigs] = useState<Config[]>([])
+  const [states, setStates] = useState<StateOption[]>([])
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [scraping, setScraping] = useState<Set<string>>(new Set())
@@ -288,7 +324,10 @@ export default function SearchConfigs() {
         loadStats(cfgs.map(c => c.id))
       })
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    fetch('/api/source-cities/states').then(r => r.json()).then(setStates)
+  }, [])
 
   const create = async (data: typeof BLANK) => {
     await fetch('/api/configs/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -395,9 +434,10 @@ export default function SearchConfigs() {
                     {c.variants.map(v => (
                       <span key={v} className="bg-slate-800 text-slate-300 text-xs px-1.5 py-0.5 rounded">{v}</span>
                     ))}
-                    {c.regions.map(r => (
-                      <span key={r} className="bg-slate-800 text-blue-300 text-xs px-1.5 py-0.5 rounded">{r}</span>
-                    ))}
+                    {c.regions.map(r => {
+                      const stateName = states.find(s => s.state_key === r)?.state_name ?? r
+                      return <span key={r} className="bg-slate-800 text-blue-300 text-xs px-1.5 py-0.5 rounded">{stateName}</span>
+                    })}
                     {c.fuel_types.map(f => (
                       <span key={f} className="bg-slate-800 text-amber-300 text-xs px-1.5 py-0.5 rounded">{f}</span>
                     ))}
