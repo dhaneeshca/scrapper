@@ -79,6 +79,15 @@ type PriceRangeMap = Record<string, Record<string, { min: number; max: number; a
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+type TagKey = 'deal' | 'below' | 'price_drop' | 'price_rise'
+
+const TAG_DEFS: { key: TagKey; label: string; activeCls: string }[] = [
+  { key: 'deal',       label: 'deal',         activeCls: 'bg-emerald-900/80 text-emerald-300 border-emerald-800/60' },
+  { key: 'below',      label: 'below market', activeCls: 'bg-green-900/60 text-green-300 border-green-800/50' },
+  { key: 'price_drop', label: '↓ price drop', activeCls: 'bg-emerald-950 text-emerald-400 border-emerald-800/50' },
+  { key: 'price_rise', label: '↑ price rise', activeCls: 'bg-red-950 text-red-400 border-red-800/50' },
+]
+
 const INIT_FILTERS: Filters = {
   config_id: '',
   source: '',
@@ -651,8 +660,25 @@ export default function Listings() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[] | null>(null)
   const [carConfigs, setCarConfigs] = useState<CarConfig[]>([])
   const [priceRangeMap, setPriceRangeMap] = useState<PriceRangeMap>({})
+  const [activeTags, setActiveTags] = useState<Set<TagKey>>(new Set())
 
   const setF = (k: keyof Filters, v: string) => setFilters(f => ({ ...f, [k]: v }))
+
+  const toggleTag = (tag: TagKey) =>
+    setActiveTags(prev => { const s = new Set(prev); s.has(tag) ? s.delete(tag) : s.add(tag); return s })
+
+  const matchesTag = (l: Listing, tag: TagKey): boolean => {
+    if (tag === 'price_drop') return l.price_change_delta != null && l.price_change_delta < 0
+    if (tag === 'price_rise') return l.price_change_delta != null && l.price_change_delta > 0
+    const deal = dealScore(l.price, l.variant_canonical ?? l.variant, l.year, priceRangeMap)
+    if (tag === 'deal')  return (deal?.pct ?? 0) <= -15
+    if (tag === 'below') return (deal?.pct ?? 0) <= -5
+    return false
+  }
+
+  const tagArray = [...activeTags]
+  const displayListings = tagArray.length === 0 ? listings : listings.filter(l => tagArray.every(t => matchesTag(l, t)))
+  const displayGroups   = tagArray.length === 0 ? groups   : groups.filter(g => tagArray.every(t => matchesTag(g.representative, t)))
   const selectedConfig = carConfigs.find(c => c.id === filters.config_id) ?? null
 
   const loadOptions = useCallback((configId = filters.config_id) => {
@@ -751,7 +777,7 @@ export default function Listings() {
     handleListingUpdated({ ...l, not_interested: !l.not_interested })
   }
 
-  const count = mode === 'deduped' ? groups.length : listings.length
+  const count = mode === 'deduped' ? displayGroups.length : displayListings.length
   const isEmpty = count === 0 && !loading
 
   return (
@@ -860,6 +886,29 @@ export default function Listings() {
           </div>
         </div>
 
+        {/* Tag filters */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+          <span className="text-xs text-slate-500 mr-0.5">Tags</span>
+          {TAG_DEFS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => toggleTag(t.key)}
+              className={`text-[11px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                activeTags.has(t.key)
+                  ? t.activeCls
+                  : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-300'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+          {activeTags.size > 0 && (
+            <button onClick={() => setActiveTags(new Set())} className="text-[11px] text-slate-600 hover:text-slate-400 ml-1">
+              clear
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center gap-3 pt-0.5">
           <div className={`flex items-center gap-1.5 ${mode === 'deduped' ? 'opacity-30 pointer-events-none' : ''}`}>
             <label className="text-xs text-slate-500">Sort</label>
@@ -877,7 +926,7 @@ export default function Listings() {
           </div>
           <div className="ml-auto flex gap-2">
             <button
-              onClick={() => { setFilters(INIT_FILTERS); setSearchQ(''); loadOptions('') }}
+              onClick={() => { setFilters(INIT_FILTERS); setSearchQ(''); setActiveTags(new Set()); loadOptions('') }}
               className="text-slate-500 hover:text-slate-300 text-xs px-2 py-1.5"
             >
               reset
@@ -899,7 +948,7 @@ export default function Listings() {
       {/* All listings */}
       {mode === 'all' && !isEmpty && (
         <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/40 overflow-hidden">
-          {listings.map((l, i) => {
+          {displayListings.map((l, i) => {
             const displayVariant = l.variant  // raw scraped name
             const analysisVariant = l.variant_canonical ?? l.variant  // canonical for deal score
             const km = kmHealth(l.km_driven, l.year)
@@ -981,7 +1030,7 @@ export default function Listings() {
       {/* Deduped */}
       {mode === 'deduped' && !isEmpty && (
         <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/40 overflow-hidden">
-          {groups.map((g, i) => {
+          {displayGroups.map((g, i) => {
             const rep = g.representative
             const displayVariant = rep.variant  // raw scraped name
             const analysisVariant = rep.variant_canonical ?? rep.variant  // canonical for deal score
