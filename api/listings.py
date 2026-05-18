@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 
 from store.db import get_session
-from store.models import Listing, Shortlist, NotInterested
+from store.models import Listing, PriceHistory, Shortlist, NotInterested
 
 router = APIRouter()
 
@@ -37,6 +37,7 @@ class ListingOut(BaseModel):
     config_id: Optional[str]
     shortlisted: bool = False
     not_interested: bool = False
+    price_change_delta: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -50,6 +51,29 @@ class ListingPatch(BaseModel):
     transmission: Optional[str] = None
     location_city: Optional[str] = None
     description: Optional[str] = None
+
+
+def _batch_price_deltas(session, ids: list[str]) -> dict[str, int]:
+    """Return {listing_id: delta} where delta = latest_price - second_latest_price."""
+    if not ids:
+        return {}
+    subq = (
+        session.query(
+            PriceHistory.listing_id,
+            PriceHistory.price,
+            func.row_number().over(
+                partition_by=PriceHistory.listing_id,
+                order_by=PriceHistory.observed_at.desc(),
+            ).label("rn"),
+        )
+        .filter(PriceHistory.listing_id.in_(ids))
+        .subquery()
+    )
+    rows = session.query(subq).filter(subq.c.rn <= 2).all()
+    by_id: dict[str, list[int]] = {}
+    for row in rows:
+        by_id.setdefault(row.listing_id, []).append(row.price)
+    return {lid: prices[0] - prices[1] for lid, prices in by_id.items() if len(prices) == 2}
 
 
 def _apply_q(q: str, query):
@@ -168,12 +192,14 @@ def list_listings(
             r.listing_id
             for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
+        deltas = _batch_price_deltas(session, ids)
 
         out = []
         for r in rows:
             d = ListingOut.model_validate(r)
             d.shortlisted = r.id in shortlisted_ids
             d.not_interested = r.id in not_interested_ids
+            d.price_change_delta = deltas.get(r.id)
             out.append(d)
         return out
 
@@ -243,6 +269,7 @@ def deduped_listings(
             r.listing_id
             for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
+        deltas = _batch_price_deltas(session, ids)
 
         groups: dict[str, list[Listing]] = {}
         no_dedup: list[Listing] = []
@@ -258,6 +285,7 @@ def deduped_listings(
             d = ListingOut.model_validate(rep)
             d.shortlisted = rep.id in shortlisted_ids
             d.not_interested = rep.id in not_interested_ids
+            d.price_change_delta = deltas.get(rep.id)
             result.append(DedupGroup(
                 dedup_key=key,
                 best_price=rep.price or 0,
@@ -270,6 +298,7 @@ def deduped_listings(
             d = ListingOut.model_validate(r)
             d.shortlisted = r.id in shortlisted_ids
             d.not_interested = r.id in not_interested_ids
+            d.price_change_delta = deltas.get(r.id)
             result.append(DedupGroup(
                 dedup_key=r.id,
                 best_price=r.price or 0,
@@ -313,3 +342,17 @@ def patch_listing(listing_id: str, body: ListingPatch):
         d.shortlisted = sl is not None
         d.not_interested = ni is not None
         return d
+
+
+@router.get("/{listing_id}/price-history")
+def listing_price_history(listing_id: str):
+    with get_session() as session:
+        if not session.query(Listing).filter_by(id=listing_id).first():
+            raise HTTPException(404, "not found")
+        rows = (
+            session.query(PriceHistory)
+            .filter_by(listing_id=listing_id)
+            .order_by(PriceHistory.observed_at.asc())
+            .all()
+        )
+        return [{"price": r.price, "observed_at": r.observed_at.isoformat()} for r in rows]

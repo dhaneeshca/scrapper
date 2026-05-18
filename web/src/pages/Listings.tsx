@@ -25,6 +25,7 @@ interface Listing {
   is_manually_edited: boolean
   shortlisted: boolean
   not_interested: boolean
+  price_change_delta: number | null
 }
 
 interface DedupGroup {
@@ -226,6 +227,78 @@ interface PatchBody {
   description?: string
 }
 
+// ── Price sparkline ────────────────────────────────────────────────────────────
+
+interface PricePoint { price: number; observed_at: string }
+
+function PriceSparkline({ data }: { data: PricePoint[] }) {
+  const W = 260
+  const H = 48
+  const PAD = 4
+
+  const prices = data.map(d => d.price)
+  const minP = Math.min(...prices)
+  const maxP = Math.max(...prices)
+  const priceRange = maxP - minP || 1
+
+  const dates = data.map(d => new Date(d.observed_at).getTime())
+  const minT = dates[0]
+  const maxT = dates[dates.length - 1]
+  const timeRange = maxT - minT || 1
+
+  const toX = (t: number) => PAD + ((t - minT) / timeRange) * (W - PAD * 2)
+  const toY = (p: number) => PAD + (1 - (p - minP) / priceRange) * (H - PAD * 2)
+
+  const points = data.map((d, i) => `${toX(dates[i])},${toY(d.price)}`).join(' ')
+
+  const first = data[0]
+  const last = data[data.length - 1]
+  const delta = last.price - first.price
+  const deltaColor = delta < 0 ? '#34d399' : delta > 0 ? '#f87171' : '#64748b'
+  const deltaLabel = delta === 0 ? 'no change' : `${delta < 0 ? '↓' : '↑'}${fmt_price(Math.abs(delta))}`
+
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso)
+    return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-mono text-[10px] text-slate-500">{fmtDate(first.observed_at)}</span>
+        <span className="font-mono text-[10px]" style={{ color: deltaColor }}>{deltaLabel}</span>
+        <span className="font-mono text-[10px] text-slate-500">{fmtDate(last.observed_at)}</span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        <polyline
+          points={points}
+          fill="none"
+          stroke="#475569"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+        {data.map((d, i) => (
+          <circle
+            key={i}
+            cx={toX(dates[i])}
+            cy={toY(d.price)}
+            r={i === 0 || i === data.length - 1 ? 3 : 2}
+            fill={i === data.length - 1 ? '#94a3b8' : '#334155'}
+            stroke="#475569"
+            strokeWidth="1"
+          />
+        ))}
+      </svg>
+      <div className="flex items-center justify-between mt-0.5">
+        <span className="font-mono text-[10px] text-slate-600">{fmt_price(first.price)}</span>
+        <span className="font-mono text-[10px] text-slate-400 font-medium">{fmt_price(last.price)}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Listing panel ──────────────────────────────────────────────────────────────
+
 function ListingPanel({
   listing,
   groupListingIds,
@@ -256,12 +329,14 @@ function ListingPanel({
   })
   const [saving, setSaving] = useState(false)
   const [fairValue, setFairValue] = useState<FairValueData | null>(null)
+  const [priceHistory, setPriceHistory] = useState<PricePoint[]>([])
 
   // Reset when parent opens a new listing
   useEffect(() => {
     setActiveListing(listing)
     setGroupListings([])
     setEditing(false)
+    setPriceHistory([])
   }, [listing.id])
 
   // Sync form and fair value when active listing changes
@@ -286,6 +361,14 @@ function ListingPanel({
       .then(r => r.json())
       .then(setFairValue)
       .catch(() => setFairValue(null))
+  }, [activeListing.id])
+
+  // Fetch price history for the active listing
+  useEffect(() => {
+    fetch(`/api/listings/${activeListing.id}/price-history`)
+      .then(r => r.json())
+      .then(setPriceHistory)
+      .catch(() => setPriceHistory([]))
   }, [activeListing.id])
 
   // Fetch all listings in the dedup group so vendor switcher has prices+sources
@@ -458,6 +541,12 @@ function ListingPanel({
           )}
           {fairValue && fairValue.sample_size > 0 && fairValue.sample_size < 5 && (
             <div className="mt-1 text-xs text-slate-600">Market rate · low data ({fairValue.sample_size} cars)</div>
+          )}
+          {priceHistory.length > 1 && (
+            <div className="mt-3 pt-3 border-t border-slate-800/60">
+              <div className="text-[10px] text-slate-600 mb-1.5">price history</div>
+              <PriceSparkline data={priceHistory} />
+            </div>
           )}
         </div>
 
@@ -853,7 +942,14 @@ export default function Listings() {
 
                 {/* Right: price + source */}
                 <div className="flex-shrink-0 text-right space-y-1">
-                  <div className="text-base font-mono font-bold text-white">{fmt_price(l.price)}</div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <div className="text-base font-mono font-bold text-white">{fmt_price(l.price)}</div>
+                    {l.price_change_delta != null && l.price_change_delta !== 0 && (
+                      <span className={`text-[10px] font-mono ${l.price_change_delta < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {l.price_change_delta < 0 ? '↓' : '↑'}{fmt_price(Math.abs(l.price_change_delta))}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center justify-end gap-1.5">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${SOURCE_COLORS[l.source] ?? 'bg-slate-700 text-slate-300'}`}>
                       {l.source}
@@ -937,7 +1033,14 @@ export default function Listings() {
                 </div>
 
                 <div className="flex-shrink-0 text-right">
-                  <div className="text-base font-mono font-bold text-white">{fmt_price(g.best_price)}</div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <div className="text-base font-mono font-bold text-white">{fmt_price(g.best_price)}</div>
+                    {rep.price_change_delta != null && rep.price_change_delta !== 0 && (
+                      <span className={`text-[10px] font-mono ${rep.price_change_delta < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {rep.price_change_delta < 0 ? '↓' : '↑'}{fmt_price(Math.abs(rep.price_change_delta))}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <button
