@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from store.db import init_db
 from api import configs, listings, shortlist, not_interested, stats, scrape, variants, specs, source_cities
 
-app = FastAPI(title="scrapper", version="0.1.0")
+app = FastAPI(title="Used Car Scraper", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

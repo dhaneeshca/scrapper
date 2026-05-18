@@ -21,7 +21,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f1117] text-slate-200">
       <header className="border-b border-slate-800 px-6 py-3 flex items-center gap-6">
-        <span className="text-slate-500 font-mono text-sm tracking-widest">scrapper</span>
+        <span className="text-slate-500 font-mono text-sm tracking-widest">Used Car Scraper</span>
         <nav className="flex gap-1">
           {(Object.keys(TAB_LABELS) as Tab[]).map(t => (
             <button
