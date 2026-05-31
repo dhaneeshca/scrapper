@@ -73,7 +73,7 @@ pytestmark_db = pytest.mark.skipif(not _db_available(), reason="Postgres not rea
 @pytestmark_db
 class TestDropQueries:
     CFG = "test-pricedrop-cfg"
-    IDS = ["t-drop", "t-rise", "t-flat"]
+    IDS = ["t-drop", "t-drop2", "t-rise", "t-flat", "t-misparse"]
 
     @pytest.fixture(autouse=True)
     def seed(self):
@@ -95,9 +95,11 @@ class TestDropQueries:
             s.commit()
         with get_session() as s:
             specs = [
-                ("t-drop", 800_000, [(900_000, now - timedelta(days=20)), (800_000, now - timedelta(days=2))]),
-                ("t-rise", 760_000, [(700_000, now - timedelta(days=15)), (760_000, now - timedelta(days=1))]),
-                ("t-flat", 500_000, [(500_000, now - timedelta(days=5))]),
+                ("t-drop",     800_000, [(900_000, now - timedelta(days=20)), (800_000, now - timedelta(days=2))]),   # -100k, valid
+                ("t-drop2",    700_000, [(1_000_000, now - timedelta(days=18)), (700_000, now - timedelta(days=2))]),  # -300k, valid, bigger
+                ("t-rise",     760_000, [(700_000, now - timedelta(days=15)), (760_000, now - timedelta(days=1))]),
+                ("t-flat",     500_000, [(500_000, now - timedelta(days=5))]),
+                ("t-misparse", 743_000, [(3_900_000, now - timedelta(days=15)), (743_000, now - timedelta(days=2))]),  # -81%, data error
             ]
             for lid, price, hist in specs:
                 s.add(Listing(id=lid, source="test", source_id=lid, url=f"http://x/{lid}",
@@ -117,19 +119,20 @@ class TestDropQueries:
         base.update(kw)
         return list_listings(config_id=self.CFG, **base)
 
-    def test_drop_filter(self):
-        rows = self._LL(price_change="drop")
-        assert [r.id for r in rows] == ["t-drop"]
-        assert rows[0].price_total_delta == -100_000
+    def test_drop_filter_excludes_misparse(self):
+        ids = [r.id for r in self._LL(price_change="drop")]
+        assert set(ids) == {"t-drop", "t-drop2"}   # valid drops only
+        assert "t-misparse" not in ids             # -81% swing guarded out
 
     def test_rise_filter(self):
         rows = self._LL(price_change="rise")
         assert [r.id for r in rows] == ["t-rise"]
 
     def test_biggest_drop_sort(self):
-        rows = self._LL(sort_by="price_drop", sort_dir="asc")
-        assert rows[0].id == "t-drop"      # most negative first
-        assert rows[-1].id == "t-rise"     # most positive last
+        # The Price Drops tab sends both price_change=drop and sort_by=price_drop
+        rows = self._LL(price_change="drop", sort_by="price_drop", sort_dir="asc")
+        assert rows[0].id == "t-drop2"             # -300k, biggest valid drop first
+        assert "t-misparse" not in [r.id for r in rows]
 
     def test_deduped_respects_config(self):
         from api.listings import deduped_listings

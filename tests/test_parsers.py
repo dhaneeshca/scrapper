@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from scraper.base import _parse_owner_count, RawListing
 from scraper.engine import _dedup_key
-from scraper.cardekho import _parse_price_lakh, _parse_km, _parse_year, _variant_from_url
+from scraper.cardekho import _parse_price_lakh, _parse_km, _parse_year, _variant_from_url, _valid_city_tokens
 from scraper.cars24 import _parse_price as cars24_parse_price, _parse_km as cars24_parse_km, _parse_year as cars24_parse_year
 from scraper.carwale import _parse_price as carwale_parse_price
 from scraper.spinny import _to_raw
@@ -69,6 +69,28 @@ class TestCardekhoVariantFromUrl:
 
     def test_no_match(self):
         assert _variant_from_url("https://example.com/no-variant", "vento") == ""
+
+
+class TestValidCityTokens:
+    # Mirrors the seed: city_key "trichy" carries cartrade slug "tiruchirappalli"
+    CFG = {
+        "chennai": {"cartrade": {"source_config": {"slug": "chennai"}}, "olx": {"source_config": {"slug": "tamil-nadu"}}},
+        "trichy":  {"cartrade": {"source_config": {"slug": "tiruchirappalli"}}, "olx": {"source_config": {"slug": "tamil-nadu"}}},
+    }
+
+    def test_includes_city_key_and_slug_alias(self):
+        toks = _valid_city_tokens(self.CFG)
+        assert "chennai" in toks
+        assert "trichy" in toks
+        assert "tiruchirappalli" in toks  # cardekho's label for Trichy matches via cartrade slug
+
+    def test_excludes_out_of_state(self):
+        toks = _valid_city_tokens(self.CFG)
+        assert "bangalore" not in toks
+        assert "mumbai" not in toks
+
+    def test_none_returns_empty(self):
+        assert _valid_city_tokens(None) == set()
 
 
 # ── cars24 ────────────────────────────────────────────────────────────────────

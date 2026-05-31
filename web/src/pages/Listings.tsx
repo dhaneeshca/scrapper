@@ -754,9 +754,12 @@ export default function Listings() {
     setActiveTags(prev => { const s = new Set(prev); s.has(tag) ? s.delete(tag) : s.add(tag); return s })
 
   const matchesTag = (l: Listing, tag: TagKey): boolean => {
-    // Total move since first listed (not just the last step)
-    if (tag === 'price_drop') return l.price_total_delta != null && l.price_total_delta < 0
-    if (tag === 'price_rise') return l.price_total_delta != null && l.price_total_delta > 0
+    // Total move since first listed (not just the last step). Plausibility guard
+    // (price within 2x/half of first) excludes misparse swings — matches the server.
+    const plausible = l.price != null && l.price_first != null
+      && l.price >= l.price_first * 0.5 && l.price <= l.price_first * 2
+    if (tag === 'price_drop') return plausible && l.price_total_delta != null && l.price_total_delta < 0
+    if (tag === 'price_rise') return plausible && l.price_total_delta != null && l.price_total_delta > 0
     const deal = dealScore(l.price, l.variant_canonical ?? l.variant, l.year, priceRangeMap)
     if (tag === 'deal')  return (deal?.pct ?? 0) <= -15
     if (tag === 'below') return (deal?.pct ?? 0) <= -5

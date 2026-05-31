@@ -29,6 +29,27 @@ def _slug(s: str) -> str:
     return s.lower().replace(" ", "-")
 
 
+def _valid_city_tokens(city_configs: dict[str, dict] | None) -> set[str]:
+    """Set of acceptable city slugs for the requested region(s).
+
+    cardekho's per-city pages also surface "featured" cars from other metros, so we
+    keep only cars whose city is one of the requested state's cities. The seed stores
+    each city's name variants in the per-source slugs (e.g. trichy → cartrade slug
+    'tiruchirappalli'), so the union of city_key + every source slug gives the aliases
+    needed to match cardekho's reported city names. Empty set = no filtering.
+    """
+    if not city_configs:
+        return set()
+    tokens: set[str] = set()
+    for city_key, srcs in city_configs.items():
+        tokens.add(_slug(city_key))
+        for src_cfg in srcs.values():
+            slug = (src_cfg.get("source_config") or {}).get("slug")
+            if slug:
+                tokens.add(_slug(slug))
+    return tokens
+
+
 def _parse_price_lakh(raw: str) -> int:
     """
     CarDekho prices come in two forms:
@@ -190,6 +211,7 @@ class CardekhoScraper(Scraper):
         city_configs: dict[str, dict] | None = None,
     ) -> list[RawListing]:
         cities = list(city_configs.keys()) if city_configs else (regions if regions else [""])
+        valid_tokens = _valid_city_tokens(city_configs)
         results: list[RawListing] = []
 
         with sync_playwright() as pw:
@@ -201,7 +223,7 @@ class CardekhoScraper(Scraper):
             for city in cities:
                 url = self._search_url(make, model, city)
                 _log.info("scraping %s", url)
-                self._scrape_paginated(page, url, make, model, city, year_min, year_max, budget_max, results)
+                self._scrape_paginated(page, url, make, model, valid_tokens, year_min, year_max, budget_max, results)
                 time.sleep(_PAGE_DELAY)
 
             browser.close()
@@ -220,7 +242,7 @@ class CardekhoScraper(Scraper):
         start_url: str,
         make: str,
         model: str,
-        city: str,
+        valid_tokens: set[str],
         year_min: int,
         year_max: int,
         budget_max: int,
@@ -252,9 +274,12 @@ class CardekhoScraper(Scraper):
                     continue
                 seen_urls.add(raw.url)
 
-                # No exact-city post-filter: the +in+{city} URL already scopes results,
-                # searches are state-scoped, and cardekho labels cities differently from
-                # our city_key (e.g. "trichy" → "Tiruchirappalli"). Dedup handles overlap.
+                # Keep only cars in the requested state. cardekho's per-city pages also
+                # surface "featured" cars from other metros; valid_tokens (city_key +
+                # seeded source slugs) matches cardekho's names (e.g. "Tiruchirappalli")
+                # while excluding cross-state cars. Empty set (fallback) = no filter.
+                if valid_tokens and _slug(raw.location_city) not in valid_tokens:
+                    continue
                 if year_min and raw.year and raw.year < year_min:
                     continue
                 if year_max and raw.year and raw.year > year_max:

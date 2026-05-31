@@ -246,10 +246,19 @@ def list_listings(
                 .subquery()
             )
             sq = sq.join(move_sq, move_sq.c.lid == Listing.id)
+            # Plausibility guard: a real used-car move rarely exceeds 2x/half; bigger
+            # swings are almost always a misparse in one observation, so exclude them
+            # from the drop/rise feature (the listing's true history still shows in detail).
             if price_change == "drop":
-                sq = sq.filter(move_sq.c.current_price < move_sq.c.first_price)
+                sq = sq.filter(
+                    move_sq.c.current_price < move_sq.c.first_price,
+                    move_sq.c.current_price >= move_sq.c.first_price * 0.5,
+                )
             elif price_change == "rise":
-                sq = sq.filter(move_sq.c.current_price > move_sq.c.first_price)
+                sq = sq.filter(
+                    move_sq.c.current_price > move_sq.c.first_price,
+                    move_sq.c.current_price <= move_sq.c.first_price * 2.0,
+                )
 
         if active_only:
             sq = sq.filter(Listing.is_active.is_(True))
