@@ -356,11 +356,14 @@ export default function SearchConfigs() {
     setScraping(prev => new Set([...prev, key]))
     setScrapeLog(prev => ({ ...prev, [key]: [] }))
 
+    let closed = false
+
     const es = new EventSource(url)
     es.onmessage = (e) => {
       const event: ProgressEvent = JSON.parse(e.data)
       setScrapeLog(prev => ({ ...prev, [key]: [...(prev[key] ?? []), event] }))
       if (event.type === 'done') {
+        closed = true
         es.close()
         setScraping(prev => { const s = new Set(prev); s.delete(key); return s })
         loadStats([configId])
@@ -369,6 +372,16 @@ export default function SearchConfigs() {
     es.onerror = () => {
       es.close()
       setScraping(prev => { const s = new Set(prev); s.delete(key); return s })
+      if (!closed) {
+        // Stream dropped before 'done' — show error in log; scrape may still be running
+        setScrapeLog(prev => ({
+          ...prev,
+          [key]: [
+            ...(prev[key] ?? []),
+            { type: 'scraper_error', source: '', message: 'Connection lost — scrape may still be running on the server. Check run history.' } as ProgressEvent,
+          ],
+        }))
+      }
     }
   }
 

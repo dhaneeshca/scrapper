@@ -21,7 +21,6 @@ LOG_FILE = open(log.LOG_FILE, "a", encoding="utf-8")
 
 procs = []
 
-
 def _kill_all():
     for p in procs:
         try:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Query, HTTPException
@@ -37,7 +37,17 @@ class ListingOut(BaseModel):
     config_id: Optional[str]
     shortlisted: bool = False
     not_interested: bool = False
-    price_change_delta: Optional[int] = None
+    price_change_delta: Optional[int] = None  # last-step delta (back-compat)
+    owner_count: Optional[int] = None
+    # Price-movement summary (total since first listed)
+    price_first: Optional[int] = None
+    price_total_delta: Optional[int] = None
+    price_total_pct: Optional[float] = None
+    first_seen_at: Optional[datetime] = None
+    last_change_at: Optional[datetime] = None
+    days_on_market: Optional[int] = None
+    num_price_points: Optional[int] = None
+    price_points: Optional[list] = None  # [{price, observed_at}] for the loaded set
 
     model_config = {"from_attributes": True}
 
@@ -76,6 +86,69 @@ def _batch_price_deltas(session, ids: list[str]) -> dict[str, int]:
     return {lid: prices[0] - prices[1] for lid, prices in by_id.items() if len(prices) == 2}
 
 
+def _summarize_points(pts: list, now: datetime) -> dict:
+    """Pure price-movement summary for one listing's ordered (price, observed_at) points.
+
+    `pts` must be sorted ascending by observed_at. Pure (no DB) so it is unit-testable.
+    """
+    first_price, first_at = pts[0]
+    current_price, _ = pts[-1]
+    total_delta = current_price - first_price
+    total_pct = round(100 * total_delta / first_price, 1) if first_price else None
+    # last_change_at = observed_at of the most recent point whose price differs from the prior one
+    last_change_at = first_at
+    for i in range(1, len(pts)):
+        if pts[i][0] != pts[i - 1][0]:
+            last_change_at = pts[i][1]
+    first_aware = first_at if first_at.tzinfo else first_at.replace(tzinfo=timezone.utc)
+    return {
+        "price_first": first_price,
+        "price_total_delta": total_delta,
+        "price_total_pct": total_pct,
+        "first_seen_at": first_at,
+        "last_change_at": last_change_at,
+        "days_on_market": (now - first_aware).days,
+        "num_price_points": len(pts),
+        "price_points": [{"price": p, "observed_at": o.isoformat()} for p, o in pts],
+    }
+
+
+def _batch_price_summary(session, ids: list[str]) -> dict[str, dict]:
+    """Per-listing price-movement summary based on the FULL history (not just last step).
+
+    Returns {listing_id: {price_first, price_total_delta, price_total_pct, first_seen_at,
+    last_change_at, days_on_market, num_price_points, price_points}}.
+    """
+    if not ids:
+        return {}
+    rows = (
+        session.query(PriceHistory.listing_id, PriceHistory.price, PriceHistory.observed_at)
+        .filter(PriceHistory.listing_id.in_(ids))
+        .order_by(PriceHistory.listing_id, PriceHistory.observed_at.asc())
+        .all()
+    )
+    by_id: dict[str, list] = {}
+    for r in rows:
+        by_id.setdefault(r.listing_id, []).append((r.price, r.observed_at))
+
+    now = datetime.now(timezone.utc)
+    return {lid: _summarize_points(pts, now) for lid, pts in by_id.items()}
+
+
+def _apply_price_summary(d: "ListingOut", summary: dict | None) -> None:
+    """Attach price-movement fields from _batch_price_summary onto a ListingOut."""
+    if not summary:
+        return
+    d.price_first = summary["price_first"]
+    d.price_total_delta = summary["price_total_delta"]
+    d.price_total_pct = summary["price_total_pct"]
+    d.first_seen_at = summary["first_seen_at"]
+    d.last_change_at = summary["last_change_at"]
+    d.days_on_market = summary["days_on_market"]
+    d.num_price_points = summary["num_price_points"]
+    d.price_points = summary["price_points"]
+
+
 def _apply_q(q: str, query):
     term = f"%{q}%"
     return query.filter(
@@ -110,11 +183,16 @@ def listing_options(
                 if r[0]
             ]
 
+        owner_counts = sorted([
+            r[0] for r in
+            q.with_entities(Listing.owner_count).filter(Listing.owner_count.isnot(None)).distinct().all()
+        ])
         return {
             "variants": distinct(Listing.variant_canonical),
             "cities": distinct(Listing.location_city),
             "fuel_types": distinct(Listing.fuel_type),
             "transmissions": distinct(Listing.transmission),
+            "owner_counts": owner_counts,
         }
 
 
@@ -135,13 +213,43 @@ def list_listings(
     city: Optional[str] = None,
     q: Optional[str] = None,
     active_only: bool = True,
-    sort_by: str = Query("scraped_at", pattern="^(price|km_driven|year|scraped_at|last_seen_at)$"),
+    owner_max: Optional[int] = None,
+    price_change: Optional[str] = Query(None, pattern="^(drop|rise)$"),
+    sort_by: str = Query("scraped_at", pattern="^(price|km_driven|year|scraped_at|last_seen_at|price_drop)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(100, le=500),
     offset: int = 0,
 ):
     with get_session() as session:
         sq = session.query(Listing)
+
+        # Price-movement filter/sort: join a per-listing (first_price, current_price)
+        # subquery so total_delta = current_price - first_price (move since first listed)
+        # can drive a WHERE (drop/rise) and an ORDER BY (biggest drop first) over the
+        # whole dataset — not just the page the client already loaded.
+        needs_movement = price_change is not None or sort_by == "price_drop"
+        move_sq = None
+        if needs_movement:
+            move_sq = (
+                session.query(
+                    PriceHistory.listing_id.label("lid"),
+                    func.first_value(PriceHistory.price).over(
+                        partition_by=PriceHistory.listing_id,
+                        order_by=PriceHistory.observed_at.asc(),
+                    ).label("first_price"),
+                    func.first_value(PriceHistory.price).over(
+                        partition_by=PriceHistory.listing_id,
+                        order_by=PriceHistory.observed_at.desc(),
+                    ).label("current_price"),
+                )
+                .distinct()
+                .subquery()
+            )
+            sq = sq.join(move_sq, move_sq.c.lid == Listing.id)
+            if price_change == "drop":
+                sq = sq.filter(move_sq.c.current_price < move_sq.c.first_price)
+            elif price_change == "rise":
+                sq = sq.filter(move_sq.c.current_price > move_sq.c.first_price)
 
         if active_only:
             sq = sq.filter(Listing.is_active.is_(True))
@@ -176,11 +284,18 @@ def list_listings(
             sq = sq.filter(func.lower(Listing.transmission) == transmission.lower())
         if city:
             sq = sq.filter(func.lower(Listing.location_city).contains(city.lower()))
+        if owner_max:
+            sq = sq.filter(Listing.owner_count.isnot(None), Listing.owner_count <= owner_max)
         if q:
             sq = _apply_q(q, sq)
 
-        col = getattr(Listing, sort_by)
-        sq = sq.order_by(col.desc() if sort_dir == "desc" else col.asc())
+        if sort_by == "price_drop":
+            # most-negative total_delta first (biggest drop)
+            total_delta = move_sq.c.current_price - move_sq.c.first_price
+            sq = sq.order_by(total_delta.asc())
+        else:
+            col = getattr(Listing, sort_by)
+            sq = sq.order_by(col.desc() if sort_dir == "desc" else col.asc())
         rows = sq.offset(offset).limit(limit).all()
 
         ids = [r.id for r in rows]
@@ -193,6 +308,7 @@ def list_listings(
             for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
         deltas = _batch_price_deltas(session, ids)
+        summaries = _batch_price_summary(session, ids)
 
         out = []
         for r in rows:
@@ -200,6 +316,7 @@ def list_listings(
             d.shortlisted = r.id in shortlisted_ids
             d.not_interested = r.id in not_interested_ids
             d.price_change_delta = deltas.get(r.id)
+            _apply_price_summary(d, summaries.get(r.id))
             out.append(d)
         return out
 
@@ -226,41 +343,65 @@ def deduped_listings(
     transmission: Optional[str] = None,
     city: Optional[str] = None,
     q: Optional[str] = None,
+    owner_max: Optional[int] = None,
     limit: int = Query(200, le=500),
 ):
     with get_session() as session:
-        sq = session.query(Listing).filter(
+        # Step 1: build the filtered base query
+        base = session.query(Listing).filter(
             Listing.is_active.is_(True),
             Listing.dedup_key.isnot(None),
         )
         if config_id:
-            sq = sq.filter(Listing.config_id == config_id)
+            base = base.filter(Listing.config_id == config_id)
         if make:
-            sq = sq.filter(func.lower(Listing.make) == make.lower())
+            base = base.filter(func.lower(Listing.make) == make.lower())
         if model:
-            sq = sq.filter(func.lower(Listing.model) == model.lower())
+            base = base.filter(func.lower(Listing.model) == model.lower())
         if year_min:
-            sq = sq.filter(Listing.year >= year_min)
+            base = base.filter(Listing.year >= year_min)
         if year_max:
-            sq = sq.filter(Listing.year <= year_max)
+            base = base.filter(Listing.year <= year_max)
         if price_min:
-            sq = sq.filter(Listing.price >= price_min)
+            base = base.filter(Listing.price >= price_min)
         if price_max:
-            sq = sq.filter(Listing.price <= price_max)
+            base = base.filter(Listing.price <= price_max)
         if km_max:
-            sq = sq.filter(Listing.km_driven <= km_max)
+            base = base.filter(Listing.km_driven <= km_max)
         if fuel_type:
-            sq = sq.filter(func.lower(Listing.fuel_type) == fuel_type.lower())
+            base = base.filter(func.lower(Listing.fuel_type) == fuel_type.lower())
         if transmission:
-            sq = sq.filter(func.lower(Listing.transmission) == transmission.lower())
+            base = base.filter(func.lower(Listing.transmission) == transmission.lower())
         if city:
-            sq = sq.filter(func.lower(Listing.location_city).contains(city.lower()))
+            base = base.filter(func.lower(Listing.location_city).contains(city.lower()))
+        if owner_max:
+            base = base.filter(Listing.owner_count.isnot(None), Listing.owner_count <= owner_max)
         if q:
-            sq = _apply_q(q, sq)
+            base = _apply_q(q, base)
 
-        rows = sq.order_by(Listing.price.asc()).limit(limit).all()
+        # Step 2: group by dedup_key in SQL to find the cheapest GROUPS.
+        # Limit applies to the number of GROUPS, not raw rows — so no members get
+        # silently dropped (the bug was capping rows then grouping in Python).
+        group_rows = (
+            base.with_entities(
+                Listing.dedup_key,
+                func.min(Listing.price).label("best_price"),
+            )
+            .group_by(Listing.dedup_key)
+            .order_by(func.min(Listing.price).asc())
+            .limit(limit)
+            .all()
+        )
+        keys = [r.dedup_key for r in group_rows]
 
-        ids = [r.id for r in rows]
+        # Step 3: fetch ALL members of those groups, preserving the SAME filters
+        # (config_id, price, year, fuel, etc.) by querying from `base`.
+        members_rows = (
+            base.filter(Listing.dedup_key.in_(keys)).order_by(Listing.price.asc()).all()
+            if keys else []
+        )
+
+        ids = [r.id for r in members_rows]
         shortlisted_ids = {
             r.listing_id
             for r in session.query(Shortlist.listing_id).filter(Shortlist.listing_id.in_(ids))
@@ -270,40 +411,25 @@ def deduped_listings(
             for r in session.query(NotInterested.listing_id).filter(NotInterested.listing_id.in_(ids))
         }
         deltas = _batch_price_deltas(session, ids)
+        summaries = _batch_price_summary(session, ids)
 
         groups: dict[str, list[Listing]] = {}
-        no_dedup: list[Listing] = []
-        for r in rows:
-            if r.dedup_key:
-                groups.setdefault(r.dedup_key, []).append(r)
-            else:
-                no_dedup.append(r)
+        for r in members_rows:
+            groups.setdefault(r.dedup_key, []).append(r)
 
         result = []
         for key, members in groups.items():
-            rep = members[0]
+            rep = members[0]  # cheapest first due to ORDER BY price ASC
             d = ListingOut.model_validate(rep)
             d.shortlisted = rep.id in shortlisted_ids
             d.not_interested = rep.id in not_interested_ids
             d.price_change_delta = deltas.get(rep.id)
+            _apply_price_summary(d, summaries.get(rep.id))
             result.append(DedupGroup(
                 dedup_key=key,
                 best_price=rep.price or 0,
                 sources=list({m.source for m in members}),
                 listing_ids=[m.id for m in members],
-                representative=d,
-            ))
-
-        for r in no_dedup:
-            d = ListingOut.model_validate(r)
-            d.shortlisted = r.id in shortlisted_ids
-            d.not_interested = r.id in not_interested_ids
-            d.price_change_delta = deltas.get(r.id)
-            result.append(DedupGroup(
-                dedup_key=r.id,
-                best_price=r.price or 0,
-                sources=[r.source],
-                listing_ids=[r.id],
                 representative=d,
             ))
 
@@ -322,6 +448,7 @@ def get_listing(listing_id: str):
         d = ListingOut.model_validate(row)
         d.shortlisted = sl is not None
         d.not_interested = ni is not None
+        _apply_price_summary(d, _batch_price_summary(session, [listing_id]).get(listing_id))
         return d
 
 

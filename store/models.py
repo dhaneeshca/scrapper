@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, Date, Text, ForeignKey, DateTime, Float, UniqueConstraint
+from sqlalchemy import Column, Index, String, Integer, Boolean, Date, Text, ForeignKey, DateTime, Float, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 
@@ -37,6 +37,10 @@ class Listing(Base):
     id = Column(String, primary_key=True, default=_uuid)
     source = Column(String, nullable=False)
     source_id = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", name="uq_listing_source_id"),
+    )
     url = Column(Text)
     make = Column(String)
     model = Column(String)
@@ -59,6 +63,7 @@ class Listing(Base):
     config_id = Column(String, ForeignKey("search_configs.id"))
     variant_canonical = Column(String)
     is_manually_edited = Column(Boolean, default=False, nullable=False, server_default="false")
+    owner_count = Column(Integer, nullable=True)
 
 
 class PriceHistory(Base):
@@ -113,6 +118,22 @@ class CarSpec(Base):
     __table_args__ = (
         UniqueConstraint("make", "model", "variant", name="uq_car_specs_make_model_variant"),
     )
+
+
+class ScrapeRun(Base):
+    __tablename__ = "scrape_runs"
+
+    run_id     = Column(String, primary_key=True)
+    config_id  = Column(String, ForeignKey("search_configs.id"), nullable=False)
+    source     = Column(String, nullable=True)   # NULL = all sources
+    status     = Column(String, nullable=False, default="running")  # running | done | error
+    inserted   = Column(Integer, nullable=False, default=0)
+    updated    = Column(Integer, nullable=False, default=0)
+    price_changes = Column(Integer, nullable=False, default=0)
+    raw_fetched = Column(Integer, nullable=False, default=0)
+    errors     = Column(JSONB, nullable=False, default=list)
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class SourceCityConfig(Base):

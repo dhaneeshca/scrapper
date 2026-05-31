@@ -12,7 +12,7 @@ import re
 import time
 from typing import Optional
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count
 
 _log = logging.getLogger(__name__)
 
@@ -36,13 +36,17 @@ def _parse_price_lakh(raw: str) -> int:
       discount: '₹5.09 L  ₹4.49L  (Save ₹60K)'  ← take the second (discounted) amount
     Returns INR integer.
     """
-    amounts = re.findall(r"₹\s*([\d.,]+)\s*(?:L|Lakh|CR|Cr)?", raw, re.IGNORECASE)
-    if not amounts:
+    # Find all ₹ + number + optional unit. Filter out K-suffix amounts (savings labels).
+    price_re = re.compile(r"₹\s*([\d.,]+)\s*(L|Lakh|CR|Cr|K)?", re.IGNORECASE)
+    matches = [(m.group(1), m.group(2) or "") for m in price_re.finditer(raw)]
+    # Drop K-suffix amounts (e.g. "₹60K" = ₹60,000 savings label, not a car price)
+    matches = [(v, u) for v, u in matches if u.upper() != "K"]
+    if not matches:
         return 0
     # Take the last amount (discounted price when there are two)
-    val = float(amounts[-1].replace(",", ""))
-    unit = raw.upper()
-    if "CR" in unit:
+    val_str, unit = matches[-1]
+    val = float(val_str.replace(",", ""))
+    if unit.upper() == "CR":
         return int(val * 10_000_000)
     return int(val * 100_000)
 
@@ -104,6 +108,7 @@ def _extract_cards(page: Page) -> list[dict]:
                 priceRaw: priceEl ? priceEl.innerText      : '',
                 location: distEl  ? distEl.innerText.trim(): '',
                 img:      imgEl   ? (imgEl.src || imgEl.dataset.src || '') : '',
+                cardText: card.innerText,
             };
         })""",
         _CARD_SEL,
@@ -166,6 +171,7 @@ def _card_to_raw(card: dict, make: str, model: str) -> Optional[RawListing]:
         price=price,
         location_city=city,
         images=[card["img"]] if card.get("img") else [],
+        owner_count=_parse_owner_count(card.get("cardText", "")),
     )
 
 
@@ -222,7 +228,6 @@ class CardekhoScraper(Scraper):
     ) -> None:
         seen_urls: set[str] = set()
         page_num = 1
-        city_lower = city.lower() if city else ""
 
         try:
             page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
@@ -237,15 +242,19 @@ class CardekhoScraper(Scraper):
                 break
 
             added = 0
+            parsed = 0
             for card in cards:
                 raw = _card_to_raw(card, make, model)
-                if raw is None or raw.url in seen_urls:
+                if raw is None:
+                    continue
+                parsed += 1
+                if raw.url in seen_urls:
                     continue
                 seen_urls.add(raw.url)
 
-                if city_lower and raw.location_city.lower() != city_lower:
-                    _log.debug("skip out-of-region listing: %s (expected %s)", raw.location_city, city)
-                    continue
+                # No exact-city post-filter: the +in+{city} URL already scopes results,
+                # searches are state-scoped, and cardekho labels cities differently from
+                # our city_key (e.g. "trichy" → "Tiruchirappalli"). Dedup handles overlap.
                 if year_min and raw.year and raw.year < year_min:
                     continue
                 if year_max and raw.year and raw.year > year_max:
@@ -257,6 +266,10 @@ class CardekhoScraper(Scraper):
                 added += 1
 
             _log.info("page %d — %d cards, %d kept (total so far: %d)", page_num, len(cards), added, len(out))
+            # Alarm only on genuine parse failure (cards present but none parseable),
+            # NOT when cards parsed fine but were filtered out by city/year/budget.
+            if cards and parsed == 0:
+                _log.warning("cardekho page %d: %d cards rendered but 0 parseable — selector likely stale", page_num, len(cards))
 
             # Click Next — CarDekho's Next button has no href, it's JS-driven
             next_btn = page.query_selector("a.next")

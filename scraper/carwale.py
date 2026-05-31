@@ -19,7 +19,7 @@ import re
 import time
 from typing import Optional
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count
 
 _log = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ def _card_text_to_raw(href: str, text: str, make: str, model: str) -> Optional[R
         transmission=transmission,
         price=price,
         location_city=city,
+        owner_count=_parse_owner_count(text),
     )
 
 

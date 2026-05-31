@@ -82,6 +82,11 @@ build:
 	@cp .env.example .env
 	@echo "  Edit .env if your DATABASE_URL differs from the default."
 
+# ── Tests ──────────────────────────────────────────────────────────────────────
+
+test: _venv
+	@$(PY) -m pytest tests/ -v
+
 # ── Config seed ────────────────────────────────────────────────────────────────
 
 seed: db-check _venv

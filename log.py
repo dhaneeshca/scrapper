@@ -23,6 +23,12 @@ def new_run_id() -> str:
     return rid
 
 
+def set_run_id(rid: str) -> str:
+    """Activate an existing run ID for the current context. Returns it."""
+    _run_id_var.set(rid)
+    return rid
+
+
 class _RunIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.run_id = _run_id_var.get()

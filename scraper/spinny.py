@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count, fetch_with_retry
 
 _log = logging.getLogger(__name__)
 
@@ -33,9 +33,11 @@ _SUPPORTED_CITIES: set[str] = {
 
 def _get_json(url: str) -> Optional[dict]:
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
-    try:
+    def _fetch():
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read())
+    try:
+        return fetch_with_retry(_fetch, attempts=3, base_delay=1.5, label=f"spinny {url}")
     except urllib.error.HTTPError as e:
         _log.warning("spinny HTTP %s: %s", e.code, url)
     except Exception as e:
@@ -72,13 +74,14 @@ class SpinnyScraper(Scraper):
                 if city and city_slug not in _SUPPORTED_CITIES:
                     _log.debug("spinny skipping unsupported city: %s", city)
                     continue
-            self._fetch_city(make, model_slug, city_slug, year_min, year_max, budget_max, results)
+            self._fetch_city(make, model, model_slug, city_slug, year_min, year_max, budget_max, results)
 
         return results
 
     def _fetch_city(
         self,
         make: str,
+        model: str,
         model_slug: str,
         city_slug: str,
         year_min: int,
@@ -104,7 +107,7 @@ class SpinnyScraper(Scraper):
 
             added = 0
             for item in items:
-                raw = _to_raw(item, make, year_min, year_max, budget_max)
+                raw = _to_raw(item, make, model, year_min, year_max, budget_max)
                 if raw:
                     out.append(raw)
                     added += 1
@@ -122,7 +125,7 @@ class SpinnyScraper(Scraper):
 
 
 def _to_raw(
-    item: dict, make: str, year_min: int, year_max: int, budget_max: int
+    item: dict, make: str, model: str, year_min: int, year_max: int, budget_max: int
 ) -> Optional[RawListing]:
     year = int(item.get("make_year") or 0)
     price = int(item.get("price") or 0)
@@ -143,12 +146,15 @@ def _to_raw(
         if img.get("file", {}).get("absurl")
     ]
 
+    owner_raw = item.get("ownership_number") or item.get("no_of_owners") or item.get("owners")
+    owner_count = int(owner_raw) if owner_raw is not None else None
+
     return RawListing(
         source="spinny",
         source_id=str(item["id"]),
         url=detail_url,
         make=item.get("make") or make,
-        model=item.get("model") or "",
+        model=item.get("model") or model,  # fall back to config model so dedup key stays aligned
         variant=item.get("variant") or "",
         year=year,
         km_driven=int(item.get("mileage") or 0),
@@ -158,4 +164,5 @@ def _to_raw(
         location_city=(item.get("city") or "").strip(),
         seller_type=item.get("seller_type") or "",
         images=images,
+        owner_count=owner_count,
     )

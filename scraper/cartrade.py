@@ -17,7 +17,7 @@ from typing import Optional
 
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
 
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count, fetch_with_retry
 
 _log = logging.getLogger(__name__)
 
@@ -70,9 +70,11 @@ _ID_CACHE: dict[tuple[str, str], Optional[tuple[int, int]]] = {}
 
 def _api_get(url: str) -> Optional[list | dict]:
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
-    try:
+    def _fetch():
         with urllib.request.urlopen(req, timeout=12) as resp:
             return json.loads(resp.read())
+    try:
+        return fetch_with_retry(_fetch, attempts=3, base_delay=1.5, label=f"cartrade {url}")
     except urllib.error.HTTPError as e:
         _log.warning("cartrade API HTTP %s: %s", e.code, url)
     except Exception as e:
@@ -191,6 +193,7 @@ def _parse_card_text(text: str, make: str, model: str) -> dict:
         "fuel": fuel.title(),
         "transmission": transmission,
         "location": location,
+        "owner_count": _parse_owner_count(text),
     }
 
 
@@ -236,6 +239,7 @@ def _extract_cards(page: Page, make: str, model: str) -> list[RawListing]:
                 transmission=parsed["transmission"],
                 price=parsed["price"],
                 location_city=parsed["location"],
+                owner_count=parsed["owner_count"],
             )
         )
     return results

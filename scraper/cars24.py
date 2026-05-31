@@ -16,7 +16,7 @@ import re
 import time
 from typing import Optional
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count
 
 _log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ _UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 _PAGE_DELAY = 3.0
-_HYDRATION_WAIT = 6000   # ms — React needs time to hydrate
+_HYDRATION_WAIT = 5000   # ms — max wait for cards before concluding "no inventory"
 
 
 def _slug(s: str) -> str:
@@ -59,7 +59,7 @@ def _parse_price(text: str) -> int:
         return 0
     # prefer last non-EMI price (discounted)
     raw = non_emi[-1].group(1).replace(",", "")
-    return int(float(raw) * 100_000)
+    return round(float(raw) * 100_000)
 
 
 def _parse_km(text: str) -> int:
@@ -158,6 +158,7 @@ def _card_to_raw(card: dict, make: str, model: str, city: str = "") -> Optional[
         location_city=location,
         seller_type="dealer",
         images=[card["img"]] if card.get("img") else [],
+        owner_count=_parse_owner_count(text),
     )
 
 
@@ -224,21 +225,32 @@ class Cars24Scraper(Scraper):
         budget_max: int,
         out: list[RawListing],
     ) -> None:
+        # Real load failure (network/DNS/timeout) → warn. A loaded page with no cards
+        # is a separate, expected case (no inventory for this make/model in this city).
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            page.wait_for_timeout(_HYDRATION_WAIT)
-            page.wait_for_selector(_CARD_SEL, timeout=10_000)
         except PlaywrightTimeout:
-            _log.warning("timeout/no cards at %s", url)
+            _log.warning("cars24 page load failed (timeout) at %s", url)
+            return
+
+        try:
+            page.wait_for_selector(_CARD_SEL, timeout=_HYDRATION_WAIT)
+        except PlaywrightTimeout:
+            # Page loaded fine but no cards rendered → no inventory, not a failure.
+            _log.info("cars24 %s: no inventory for this make/model", url.split("/")[-2])
             return
 
         seen: set[str] = set()
         cards = _extract_cards(page)
         added = 0
+        parsed = 0
 
         for card in cards:
             raw = _card_to_raw(card, make, model, city)
-            if not raw or raw.url in seen:
+            if not raw:
+                continue
+            parsed += 1
+            if raw.url in seen:
                 continue
             seen.add(raw.url)
             if year_min and raw.year and raw.year < year_min:
@@ -251,3 +263,7 @@ class Cars24Scraper(Scraper):
             added += 1
 
         _log.info("cars24 %s — %d cards, %d kept", url.split("/")[-2], len(cards), added)
+        # Alarm only on genuine parse failure (cards present, none match the model URL /
+        # parse), not on year/budget filtering.
+        if cards and parsed == 0:
+            _log.warning("cars24 %s: %d cards rendered but 0 parseable — selector likely stale", url.split("/")[-2], len(cards))

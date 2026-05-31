@@ -26,6 +26,15 @@ interface Listing {
   shortlisted: boolean
   not_interested: boolean
   price_change_delta: number | null
+  owner_count: number | null
+  price_first: number | null
+  price_total_delta: number | null
+  price_total_pct: number | null
+  first_seen_at: string | null
+  last_change_at: string | null
+  days_on_market: number | null
+  num_price_points: number | null
+  price_points: { price: number; observed_at: string }[] | null
 }
 
 interface DedupGroup {
@@ -55,6 +64,7 @@ interface Filters {
   km_max: string
   fuel_type: string
   transmission: string
+  owner_max: string
   sort_by: string
   sort_dir: string
 }
@@ -64,6 +74,7 @@ interface Options {
   cities: string[]
   fuel_types: string[]
   transmissions: string[]
+  owner_counts: number[]
 }
 
 interface FairValueData {
@@ -100,6 +111,7 @@ const INIT_FILTERS: Filters = {
   km_max: '',
   fuel_type: '',
   transmission: '',
+  owner_max: '',
   sort_by: 'scraped_at',
   sort_dir: 'desc',
 }
@@ -240,10 +252,50 @@ interface PatchBody {
 
 interface PricePoint { price: number; observed_at: string }
 
-function PriceSparkline({ data }: { data: PricePoint[] }) {
+const fmtDate = (iso: string) => {
+  const d = new Date(iso)
+  return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`
+}
+
+// Tiny inline trend line for listing rows — no labels, just the shape + endpoint.
+function MiniSparkline({ data }: { data: PricePoint[] }) {
+  const W = 56, H = 16, PAD = 2
+  const prices = data.map(d => d.price)
+  const minP = Math.min(...prices), maxP = Math.max(...prices)
+  const priceRange = maxP - minP || 1
+  const dates = data.map(d => new Date(d.observed_at).getTime())
+  const minT = dates[0], timeRange = (dates[dates.length - 1] - minT) || 1
+  const toX = (t: number) => PAD + ((t - minT) / timeRange) * (W - PAD * 2)
+  const toY = (p: number) => PAD + (1 - (p - minP) / priceRange) * (H - PAD * 2)
+  const points = data.map((d, i) => `${toX(dates[i])},${toY(d.price)}`).join(' ')
+  const delta = data[data.length - 1].price - data[0].price
+  const color = delta < 0 ? '#34d399' : delta > 0 ? '#f87171' : '#64748b'
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1" strokeLinejoin="round" />
+      <circle cx={toX(dates[dates.length - 1])} cy={toY(data[data.length - 1].price)} r="1.6" fill={color} />
+    </svg>
+  )
+}
+
+function PriceSparkline({ data, daysOnMarket }: { data: PricePoint[]; daysOnMarket?: number | null }) {
   const W = 260
   const H = 48
   const PAD = 4
+
+  const first = data[0]
+  const last = data[data.length - 1]
+
+  // Single-observation: no trend to draw — show a clear "no changes yet" state.
+  if (data.length < 2) {
+    return (
+      <div className="text-[11px] text-slate-500">
+        <span className="font-mono">{fmt_price(first.price)}</span>
+        <span className="ml-2 text-slate-600">no price changes yet</span>
+        {daysOnMarket != null && <span className="ml-1 text-slate-600">· seen {daysOnMarket}d ago</span>}
+      </div>
+    )
+  }
 
   const prices = data.map(d => d.price)
   const minP = Math.min(...prices)
@@ -260,23 +312,20 @@ function PriceSparkline({ data }: { data: PricePoint[] }) {
 
   const points = data.map((d, i) => `${toX(dates[i])},${toY(d.price)}`).join(' ')
 
-  const first = data[0]
-  const last = data[data.length - 1]
   const delta = last.price - first.price
+  const pct = first.price ? Math.round((delta / first.price) * 1000) / 10 : 0
   const deltaColor = delta < 0 ? '#34d399' : delta > 0 ? '#f87171' : '#64748b'
-  const deltaLabel = delta === 0 ? 'no change' : `${delta < 0 ? '↓' : '↑'}${fmt_price(Math.abs(delta))}`
-
-  const fmtDate = (iso: string) => {
-    const d = new Date(iso)
-    return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`
-  }
+  const deltaLabel = delta === 0
+    ? 'no change'
+    : `${delta < 0 ? '↓' : '↑'}${fmt_price(Math.abs(delta))} (${pct > 0 ? '+' : ''}${pct}%)`
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="font-mono text-[10px] text-slate-500">{fmtDate(first.observed_at)}</span>
         <span className="font-mono text-[10px]" style={{ color: deltaColor }}>{deltaLabel}</span>
-        <span className="font-mono text-[10px] text-slate-500">{fmtDate(last.observed_at)}</span>
+        {daysOnMarket != null && (
+          <span className="font-mono text-[10px] text-slate-500">{daysOnMarket}d on market</span>
+        )}
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
         <polyline
@@ -295,14 +344,51 @@ function PriceSparkline({ data }: { data: PricePoint[] }) {
             fill={i === data.length - 1 ? '#94a3b8' : '#334155'}
             stroke="#475569"
             strokeWidth="1"
-          />
+          >
+            <title>{`${fmt_price(d.price)} · ${fmtDate(d.observed_at)}`}</title>
+          </circle>
         ))}
       </svg>
       <div className="flex items-center justify-between mt-0.5">
-        <span className="font-mono text-[10px] text-slate-600">{fmt_price(first.price)}</span>
-        <span className="font-mono text-[10px] text-slate-400 font-medium">{fmt_price(last.price)}</span>
+        <span className="font-mono text-[10px] text-slate-600">{fmtDate(first.observed_at)} · {fmt_price(first.price)}</span>
+        <span className="font-mono text-[10px] text-slate-400 font-medium">{fmtDate(last.observed_at)} · {fmt_price(last.price)}</span>
       </div>
     </div>
+  )
+}
+
+// Total price-movement badge for a listing row: mini trend line + total-since-listed pill.
+function PriceMoveBadge({ l }: { l: Listing }) {
+  const delta = l.price_total_delta
+  if (delta == null || delta === 0) return null
+  const down = delta < 0
+  const pct = l.price_total_pct
+  return (
+    <span className="inline-flex items-center gap-1" title="change since first listed">
+      {l.price_points && l.price_points.length > 1 && <MiniSparkline data={l.price_points} />}
+      <span className={`text-[10px] font-mono ${down ? 'text-emerald-400' : 'text-red-400'}`}>
+        {down ? '↓' : '↑'}{fmt_price(Math.abs(delta))}{pct != null ? ` (${pct > 0 ? '+' : ''}${pct}%)` : ''}
+      </span>
+    </span>
+  )
+}
+
+// ── Owner badge ───────────────────────────────────────────────────────────────
+
+const OWNER_STYLES: Record<number, string> = {
+  1: 'bg-emerald-900/60 text-emerald-300 border-emerald-800/50',
+  2: 'bg-amber-900/60 text-amber-300 border-amber-800/50',
+  3: 'bg-orange-900/60 text-orange-300 border-orange-800/50',
+}
+
+function OwnerBadge({ count }: { count: number }) {
+  const suffix = count === 1 ? 'st' : count === 2 ? 'nd' : count === 3 ? 'rd' : 'th'
+  const label = `${count}${suffix}`
+  const cls = OWNER_STYLES[count] ?? 'bg-red-900/60 text-red-300 border-red-800/50'
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium leading-none ${cls}`}>
+      {label}
+    </span>
   )
 }
 
@@ -551,10 +637,10 @@ function ListingPanel({
           {fairValue && fairValue.sample_size > 0 && fairValue.sample_size < 5 && (
             <div className="mt-1 text-xs text-slate-600">Market rate · low data ({fairValue.sample_size} cars)</div>
           )}
-          {priceHistory.length > 1 && (
+          {priceHistory.length >= 1 && (
             <div className="mt-3 pt-3 border-t border-slate-800/60">
               <div className="text-[10px] text-slate-600 mb-1.5">price history</div>
-              <PriceSparkline data={priceHistory} />
+              <PriceSparkline data={priceHistory} daysOnMarket={activeListing.days_on_market} />
             </div>
           )}
         </div>
@@ -655,7 +741,7 @@ export default function Listings() {
   const [searchQ, setSearchQ] = useState('')
   const debouncedQ = useDebounce(searchQ, 300)
   const [loading, setLoading] = useState(false)
-  const [options, setOptions] = useState<Options>({ variants: [], cities: [], fuel_types: [], transmissions: [] })
+  const [options, setOptions] = useState<Options>({ variants: [], cities: [], fuel_types: [], transmissions: [], owner_counts: [] })
   const [selected, setSelected] = useState<Listing | null>(null)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[] | null>(null)
   const [carConfigs, setCarConfigs] = useState<CarConfig[]>([])
@@ -668,8 +754,9 @@ export default function Listings() {
     setActiveTags(prev => { const s = new Set(prev); s.has(tag) ? s.delete(tag) : s.add(tag); return s })
 
   const matchesTag = (l: Listing, tag: TagKey): boolean => {
-    if (tag === 'price_drop') return l.price_change_delta != null && l.price_change_delta < 0
-    if (tag === 'price_rise') return l.price_change_delta != null && l.price_change_delta > 0
+    // Total move since first listed (not just the last step)
+    if (tag === 'price_drop') return l.price_total_delta != null && l.price_total_delta < 0
+    if (tag === 'price_rise') return l.price_total_delta != null && l.price_total_delta > 0
     const deal = dealScore(l.price, l.variant_canonical ?? l.variant, l.year, priceRangeMap)
     if (tag === 'deal')  return (deal?.pct ?? 0) <= -15
     if (tag === 'below') return (deal?.pct ?? 0) <= -5
@@ -727,6 +814,7 @@ export default function Listings() {
     if (currentMode === 'deduped') {
       if (filters.fuel_type) p.set('fuel_type', filters.fuel_type)
       if (filters.transmission) p.set('transmission', filters.transmission)
+      if (filters.owner_max) p.set('owner_max', filters.owner_max)
       fetch(`/api/listings/deduped?${p}`)
         .then(r => r.json())
         .then(setGroups)
@@ -735,6 +823,7 @@ export default function Listings() {
       if (filters.source) p.set('source', filters.source)
       if (filters.fuel_type) p.set('fuel_type', filters.fuel_type)
       if (filters.transmission) p.set('transmission', filters.transmission)
+      if (filters.owner_max) p.set('owner_max', filters.owner_max)
       p.set('sort_by', filters.sort_by)
       p.set('sort_dir', filters.sort_dir)
       fetch(`/api/listings/?${p}`)
@@ -777,8 +866,10 @@ export default function Listings() {
     handleListingUpdated({ ...l, not_interested: !l.not_interested })
   }
 
-  const count = mode === 'deduped' ? displayGroups.length : displayListings.length
-  const isEmpty = count === 0 && !loading
+  const rawCount = mode === 'deduped' ? displayGroups.length : displayListings.length
+  const atLimit = rawCount >= 300
+  const countLabel = atLimit ? '300+' : String(rawCount)
+  const isEmpty = rawCount === 0 && !loading
 
   return (
     <div className="space-y-3">
@@ -795,8 +886,8 @@ export default function Listings() {
             </button>
           ))}
         </div>
-        <span className={`text-xs font-mono ${count > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
-          {loading ? 'loading…' : `${count} ${mode === 'deduped' ? 'unique cars' : 'listings'}`}
+        <span className={`text-xs font-mono ${rawCount > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
+          {loading ? 'loading…' : `${countLabel} ${mode === 'deduped' ? 'unique cars' : 'listings'}`}
         </span>
       </div>
 
@@ -884,6 +975,19 @@ export default function Listings() {
             <label className="text-xs text-slate-500 mb-1 block">Transmission</label>
             <AutocompleteInput value={filters.transmission} onChange={v => setF('transmission', v)} placeholder="Manual…" options={options.transmissions} />
           </div>
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">Owners</label>
+            <select
+              value={filters.owner_max}
+              onChange={e => setF('owner_max', e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+            >
+              <option value="">Any</option>
+              <option value="1">1st only</option>
+              <option value="2">Up to 2nd</option>
+              <option value="3">Up to 3rd</option>
+            </select>
+          </div>
         </div>
 
         {/* Tag filters */}
@@ -925,6 +1029,7 @@ export default function Listings() {
               <option value="year">Year</option>
               <option value="scraped_at">Date added</option>
               <option value="last_seen_at">Last seen</option>
+              <option value="price_drop">Biggest drop</option>
             </select>
             <select value={filters.sort_dir} onChange={e => setF('sort_dir', e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 outline-none">
               <option value="asc">Low → High</option>
@@ -992,6 +1097,7 @@ export default function Listings() {
                     </span>
                     {l.fuel_type && <><span className="text-slate-700">·</span><span>{l.fuel_type}</span></>}
                     {l.transmission && <><span className="text-slate-700">·</span><span>{l.transmission}</span></>}
+                    {l.owner_count != null && <><span className="text-slate-700">·</span><OwnerBadge count={l.owner_count} /></>}
                     {l.location_city && <><span className="text-slate-700">·</span><span>{l.location_city}</span></>}
                   </div>
                 </div>
@@ -1000,11 +1106,7 @@ export default function Listings() {
                 <div className="flex-shrink-0 text-right space-y-1">
                   <div className="flex items-center justify-end gap-1.5">
                     <div className="text-base font-mono font-bold text-white">{fmt_price(l.price)}</div>
-                    {l.price_change_delta != null && l.price_change_delta !== 0 && (
-                      <span className={`text-[10px] font-mono ${l.price_change_delta < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {l.price_change_delta < 0 ? '↓' : '↑'}{fmt_price(Math.abs(l.price_change_delta))}
-                      </span>
-                    )}
+                    <PriceMoveBadge l={l} />
                   </div>
                   <div className="flex items-center justify-end gap-1.5">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${SOURCE_COLORS[l.source] ?? 'bg-slate-700 text-slate-300'}`}>
@@ -1071,6 +1173,7 @@ export default function Listings() {
                       <span className="font-mono">{fmt_km(rep.km_driven)}</span>
                     </span>
                     {rep.fuel_type && <><span className="text-slate-700">·</span><span>{rep.fuel_type}</span></>}
+                    {rep.owner_count != null && <><span className="text-slate-700">·</span><OwnerBadge count={rep.owner_count} /></>}
                     {rep.location_city && <><span className="text-slate-700">·</span><span>{rep.location_city}</span></>}
                     <span className="text-slate-700">·</span>
                     <div className="flex items-center gap-1">
@@ -1091,11 +1194,7 @@ export default function Listings() {
                 <div className="flex-shrink-0 text-right">
                   <div className="flex items-center justify-end gap-1.5">
                     <div className="text-base font-mono font-bold text-white">{fmt_price(g.best_price)}</div>
-                    {rep.price_change_delta != null && rep.price_change_delta !== 0 && (
-                      <span className={`text-[10px] font-mono ${rep.price_change_delta < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {rep.price_change_delta < 0 ? '↓' : '↑'}{fmt_price(Math.abs(rep.price_change_delta))}
-                      </span>
-                    )}
+                    <PriceMoveBadge l={rep} />
                   </div>
                 </div>
 

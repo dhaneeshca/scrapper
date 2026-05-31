@@ -4,11 +4,13 @@ import SearchConfigs from './pages/SearchConfigs'
 import Stats from './pages/Stats'
 import Shortlist from './pages/Shortlist'
 import SourceCities from './pages/SourceCities'
+import PriceDrops from './pages/PriceDrops'
 
-type Tab = 'listings' | 'configs' | 'stats' | 'shortlist' | 'cities'
+type Tab = 'listings' | 'drops' | 'configs' | 'stats' | 'shortlist' | 'cities'
 
 const TAB_LABELS: Record<Tab, string> = {
   listings: 'Listings',
+  drops: 'Price Drops',
   configs: 'Searches',
   stats: 'Market',
   shortlist: 'Saved',
@@ -41,6 +43,7 @@ export default function App() {
 
       <main className="p-6">
         {tab === 'listings' && <Listings />}
+        {tab === 'drops' && <PriceDrops />}
         {tab === 'configs' && <SearchConfigs />}
         {tab === 'stats' && <Stats />}
         {tab === 'shortlist' && <Shortlist />}

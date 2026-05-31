@@ -17,12 +17,13 @@ API:
 """
 import hashlib
 import logging
+import re
 import time
 from typing import Optional
 import requests
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from playwright_stealth import Stealth
-from scraper.base import Scraper, RawListing
+from scraper.base import Scraper, RawListing, _parse_owner_count, fetch_with_retry
 
 _log = logging.getLogger(__name__)
 
@@ -148,6 +149,12 @@ def _item_to_raw(item: dict, make: str, model: str) -> Optional[RawListing]:
     images = [img["url"] for img in item.get("images", [])[:3]]
     seller_type = "dealer" if item.get("is_business") else "individual"
 
+    owner_raw = _get_param(params, "no_of_owners") or _get_param(params, "owners")
+    owner_count = _parse_owner_count(owner_raw + " owner") if owner_raw else None
+    if owner_count is None and owner_raw:
+        m = re.match(r"(\d+)", owner_raw.strip())
+        owner_count = int(m.group(1)) if m else None
+
     return RawListing(
         source="olx",
         source_id=ad_id,
@@ -164,6 +171,7 @@ def _item_to_raw(item: dict, make: str, model: str) -> Optional[RawListing]:
         location_state=state,
         seller_type=seller_type,
         images=images,
+        owner_count=owner_count,
     )
 
 
@@ -278,9 +286,15 @@ class OLXScraper(Scraper):
 
             _log.info("olx API page %d — location=%s query=%r", page, loc_label, query)
             try:
-                resp = session.get(_API_URL, params=params, timeout=30)
-                resp.raise_for_status()
-                data = resp.json().get("data", [])
+                def _fetch():
+                    r = session.get(_API_URL, params=params, timeout=30)
+                    r.raise_for_status()
+                    return r.json().get("data", [])
+                data = fetch_with_retry(
+                    _fetch, attempts=3, base_delay=2.0,
+                    retry_on=(requests.RequestException,),
+                    label=f"olx page={page} loc={loc_label}",
+                )
             except Exception as exc:
                 _log.warning("olx API error page %d location=%s: %s", page, loc_label, exc)
                 break
